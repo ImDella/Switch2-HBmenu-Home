@@ -96,18 +96,18 @@ docker build --output out .
 
 ---
 
-## Credits
-
-* **Switch 2 HOME UI, Settings & Tactile SFX:** [ImDella](https://github.com/ImDella)
-* **Switch 2 Vulkan Port (`ounce-hbmenu`):** [ouncebrew](https://github.com/ouncebrew/ounce-hbmenu)
-* **Original `nx-hbmenu`:** [switchbrew](https://github.com/switchbrew/nx-hbmenu) (based on 3DS [new-hbmenu](https://github.com/fincs/new-hbmenu) by fincs)
-* **Libraries:** `nanosvg` (zlib license), `libjpeg-turbo`, `libconfig`, `freetype2`, `physfs`
-
 ## Disclaimer
 
 This software is provided **"as is"**, without warranty of any kind. **Use it at your own risk** — I am not responsible for any damage, data loss, bans, or issues that may occur from using this homebrew application. Always keep a backup of your original `hbmenu.nro` and important SD card files.
 
 This project is an unofficial community modification and is not affiliated with, endorsed by, or associated with Nintendo. Parts of the UI code, design, and documentation were developed with the assistance of AI tools.
+
+## Credits
+
+* **Switch 2 HOME UI, Settings & Tactile SFX:** [ImDella](https://github.com/ImDella)
+* **Switch 2 Port, Toolchain & HEN:** [ounce-hbmenu](https://github.com/ouncebrew/ounce-hbmenu), [ounce-devkit](https://github.com/ouncebrew/ounce-devkit) & [kaiHEN](https://github.com/ouncebrew/kaihen) by [ouncebrew](https://github.com/ouncebrew)
+* **Original `nx-hbmenu`:** [switchbrew](https://github.com/switchbrew/nx-hbmenu) (based on 3DS [new-hbmenu](https://github.com/fincs/new-hbmenu) by fincs)
+* **Libraries:** `nanosvg` (zlib license), `libjpeg-turbo`, `libconfig`, `freetype2`, `physfs`
 
 ## License
 
