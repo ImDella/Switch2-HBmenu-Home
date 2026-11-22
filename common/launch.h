@@ -1,0 +1,28 @@
+#pragma once
+
+#include "common.h"
+
+
+typedef struct
+{
+    // Mandatory fields
+    const char* name;
+    //u32 flags;
+    bool (* init)(void);
+    void (* deinit)(void);
+    void (* launchFile)(const char* path, argData_s* args);
+
+    // Optional fields
+    //void (* useTitle)(u64 tid, u8 mediatype);
+} loaderFuncs_s;
+
+bool launchInit(void);
+void launchExit(void);
+const loaderFuncs_s* launchGetLoader(void);
+size_t launchAddArg(argData_s* ad, const char* arg);
+void launchAddArgsFromString(argData_s* ad, char* arg);
+bool launchMenuEntryLoadABIRevision(menuEntry_s* me);
+void launchMenuEntry(menuEntry_s* me);
+// True for an NRO that is not marked as built with the Switch 2 devkit, which
+// hbmenu asks about before launching.
+bool launchMenuEntryNeedsPlatformWarning(menuEntry_s* me);
