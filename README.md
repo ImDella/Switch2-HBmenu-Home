@@ -103,6 +103,12 @@ docker build --output out .
 * **Original `nx-hbmenu`:** [switchbrew](https://github.com/switchbrew/nx-hbmenu) (based on 3DS [new-hbmenu](https://github.com/fincs/new-hbmenu) by fincs)
 * **Libraries:** `nanosvg` (zlib license), `libjpeg-turbo`, `libconfig`, `freetype2`, `physfs`
 
+## Disclaimer
+
+This software is provided **"as is"**, without warranty of any kind. **Use it at your own risk** — I am not responsible for any damage, data loss, bans, or issues that may occur from using this homebrew application. Always keep a backup of your original `hbmenu.nro` and important SD card files.
+
+This project is an unofficial community modification and is not affiliated with, endorsed by, or associated with Nintendo. Parts of the UI code, design, and documentation were developed with the assistance of AI tools.
+
 ## License
 
 This project is licensed under the **ISC License** — see [LICENSE.md](LICENSE.md) for details.
