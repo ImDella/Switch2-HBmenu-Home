@@ -1328,6 +1328,17 @@ bool switch2MenuUpdate(u64 down) {
         return false;
     }
 
+    /* While Netloader is active, only allow B (cancel) and + (exit) */
+    if (menuIsNetloaderActive()) {
+        if (down & HidNpadButton_B) {
+            switch2SfxPlay(S2Sfx_Back);
+            launchMenuBackTask();
+        } else if (down & HidNpadButton_Plus) {
+            return true;
+        }
+        return false;
+    }
+
     if (down & HidNpadButton_Plus)
         return true;
 
