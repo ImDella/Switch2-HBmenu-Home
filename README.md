@@ -15,8 +15,10 @@
 | Basic Dark (Carousel) | Basic Light (Pill Focus) |
 | :---: | :---: |
 | ![Basic Dark Carousel](screenshots/home_dark.jpg) | ![Basic Light Pill](screenshots/home_light.jpg) |
-| **All Software (Grid)** | **Switch 2 Settings** |
-| ![All Software Grid](screenshots/all_software.jpg) | ![Settings Screen](screenshots/settings.png) |
+| **All Software (Grid)** | **Settings — General** |
+| ![All Software Grid](screenshots/all_software.jpg) | ![Settings General](screenshots/settings_general.jpg) |
+| **Settings — Appearance (Live Preview)** | **Settings — Audio (BGM & Sound Packs)** |
+| ![Settings Appearance](screenshots/settings_appearance.jpg) | ![Settings Audio](screenshots/settings_audio.jpg) |
 
 ---
 
