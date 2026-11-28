@@ -19,6 +19,7 @@
 #include "switch2_ui.h"
 #include "switch2_sfx.h"
 #include "switch2_wallpaper.h"
+#include "switch2_groups.h"
 #include "render.h"
 #include "../common/netloader.h"
 
@@ -34,6 +35,7 @@ typedef enum {
     S2View_Carousel = 0,
     S2View_Grid = 1,
     S2View_Settings = 2,
+    S2View_Groups = 3,
 } S2ViewMode;
 
 typedef enum {
@@ -63,6 +65,8 @@ enum {
     /* General */
     SET_DEFAULT_VIEW = 0,
     SET_SORT_ORDER,
+    SET_SHOW_GROUPS_HOME,
+    SET_HIDE_GROUPED,
     SET_SHOW_SUBTITLE,
     SET_BATTERY_PCT,
     SET_CLOCK_FORMAT,
@@ -104,8 +108,10 @@ typedef struct {
     int theme_mode;         /* 0 = Auto, 1 = Light, 2 = Dark */
     int ring_speed;         /* 0 = Slow, 1 = Normal, 2 = Fast, 3 = Static */
     int transitions;        /* 0 = Slide & Fade, 1 = Fade, 2 = Instant */
-    int default_view;       /* 0 = Carousel, 1 = All Software */
+    int default_view;       /* 0 = Carousel, 1 = All Software, 2 = Favorites (Carousel), 3 = Favorites (Grid) */
     int sort_order;         /* 0 = Favorites First, 1 = Alphabetical */
+    int show_groups_home;   /* 0 = Off, 1 = Show virtual groups inline on Home */
+    int hide_grouped;       /* 0 = Off, 1 = Hide grouped apps from main view */
     int show_subtitle;      /* 0 = Off, 1 = On */
     int show_battery_pct;   /* 0 = Off, 1 = On */
     int clock_12h;          /* 0 = 24-Hour, 1 = 12-Hour */
@@ -128,6 +134,8 @@ static const Switch2Settings kDefaultCfg = {
     .transitions = 0,
     .default_view = 0,
     .sort_order = 0,
+    .show_groups_home = 0,
+    .hide_grouped = 0,
     .show_subtitle = 1,
     .show_battery_pct = 0,
     .clock_12h = 0,
@@ -189,6 +197,23 @@ static void triggerTransition(void);
 #define GRID_CLIP_TOP    150.0f
 #define GRID_CLIP_BOTTOM 506.0f
 
+#define GROUPS_COLS      4
+#define GROUPS_START_X   128.0f
+#define GROUPS_START_Y   158.0f
+#define GROUPS_CARD_W    220.0f
+#define GROUPS_CARD_H    196.0f
+#define GROUPS_STRIDE_X  268.0f
+#define GROUPS_STRIDE_Y  224.0f
+#define GROUPS_CLIP_TOP  140.0f
+#define GROUPS_CLIP_BOT  506.0f
+
+#define PICKER_W         560.0f
+#define PICKER_H         448.0f
+#define PICKER_X         ((SCREEN_W - PICKER_W) * 0.5f)
+#define PICKER_Y         ((SCREEN_H - PICKER_H) * 0.5f)
+#define PICKER_ROW_H     48.0f
+#define PICKER_MAX_ROWS  6
+
 #define PILL_W           540.0f
 #define PILL_H           86.0f
 #define PILL_X           ((SCREEN_W - PILL_W) * 0.5f)
@@ -204,6 +229,21 @@ static S2FocusZone s_focus = S2Focus_Apps;
 static int s_pill_idx = 0;
 static bool s_favorites_only = false;
 static bool s_exit_requested = false;
+
+/* Virtual Groups state (#3) */
+static int s_active_group = -1;
+static int s_group_sel = 0;
+static float s_groups_scroll_y = 0.0f;
+static int s_group_delete_armed = -1;
+static S2ViewMode s_groups_return_view = S2View_Carousel;
+static bool s_group_opened_from_home = false;
+
+/* Quick "Add to Group" overlay state (R button on any app) */
+static bool s_group_picker_open = false;
+static char s_group_picker_path[PATH_MAX + 8];
+static char s_group_picker_name[ENTRY_NAMELENGTH + 1];
+static int s_group_picker_sel = 0;
+static int s_group_picker_scroll = 0;
 
 /* Visible filtered entry list */
 static menuEntry_s *s_visible[MAX_VISIBLE_ENTRIES];
@@ -511,6 +551,8 @@ static void switch2SettingsSave(void) {
     SAVE_INT("transitions", s_cfg.transitions);
     SAVE_INT("default_view", s_cfg.default_view);
     SAVE_INT("sort_order", s_cfg.sort_order);
+    SAVE_INT("show_groups_home", s_cfg.show_groups_home);
+    SAVE_INT("hide_grouped", s_cfg.hide_grouped);
     SAVE_INT("show_subtitle", s_cfg.show_subtitle);
     SAVE_INT("show_battery_pct", s_cfg.show_battery_pct);
     SAVE_INT("clock_12h", s_cfg.clock_12h);
@@ -547,8 +589,10 @@ static void switch2SettingsLoad(void) {
         if (config_lookup_int(&cfg, "theme_mode", &v))       s_cfg.theme_mode       = (v >= 0 && v <= 2) ? v : 0;
         if (config_lookup_int(&cfg, "ring_speed", &v))       s_cfg.ring_speed       = (v >= 0 && v <= 3) ? v : 1;
         if (config_lookup_int(&cfg, "transitions", &v))      s_cfg.transitions      = (v >= 0 && v <= 2) ? v : 0;
-        if (config_lookup_int(&cfg, "default_view", &v))     s_cfg.default_view     = v ? 1 : 0;
+        if (config_lookup_int(&cfg, "default_view", &v))     s_cfg.default_view     = (v >= 0 && v <= 3) ? v : 0;
         if (config_lookup_int(&cfg, "sort_order", &v))       s_cfg.sort_order       = v ? 1 : 0;
+        if (config_lookup_int(&cfg, "show_groups_home", &v)) s_cfg.show_groups_home = v ? 1 : 0;
+        if (config_lookup_int(&cfg, "hide_grouped", &v))     s_cfg.hide_grouped     = v ? 1 : 0;
         if (config_lookup_int(&cfg, "show_subtitle", &v))    s_cfg.show_subtitle    = v ? 1 : 0;
         if (config_lookup_int(&cfg, "show_battery_pct", &v)) s_cfg.show_battery_pct = v ? 1 : 0;
         if (config_lookup_int(&cfg, "clock_12h", &v))        s_cfg.clock_12h        = v ? 1 : 0;
@@ -581,6 +625,7 @@ void switch2UiInit(ThemePreset system_preset) {
     ensureMediaDirs();
     rescanMediaLists();
     switch2SettingsLoad();
+    switch2GroupsLoad();
 
     if (s_cfg.theme_mode != 0)
         switch2ApplyThemeSetting();
@@ -588,7 +633,9 @@ void switch2UiInit(ThemePreset system_preset) {
     switch2ApplySfxPack();
     switch2ApplyBgm();
 
-    s_view = (s_cfg.default_view == 1) ? S2View_Grid : S2View_Carousel;
+    s_active_group = -1;
+    s_favorites_only = (s_cfg.default_view == 2 || s_cfg.default_view == 3);
+    s_view = (s_cfg.default_view == 1 || s_cfg.default_view == 3) ? S2View_Grid : S2View_Carousel;
     s_last_view = s_view;
     s_trans_t = 1.0f;
 }
@@ -599,19 +646,84 @@ void switch2UiExit(void) {
 
 /* --- Visible Entry List & Scroll Helpers ---------------------------------- */
 
+static int inlineGroupsCount(void) {
+    menu_s *menu = menuGetCurrent();
+    if (!s_cfg.show_groups_home || menuIsThemeMenuActive() || s_active_group >= 0 || s_favorites_only)
+        return 0;
+    if (!menu || strcmp(menu->dirname, menuGetRootPath()) != 0)
+        return 0;
+    return switch2GroupsCount();
+}
+
 static bool hasEndAllSoftwareTile(void) {
-    return s_view == S2View_Carousel && !menuIsThemeMenuActive() && s_visible_count > 0;
+    int content_slots = inlineGroupsCount() + s_visible_count;
+    return s_view == S2View_Carousel && !menuIsThemeMenuActive() && s_active_group < 0 && content_slots > 0;
+}
+
+static float groupsMaxScrollY(void) {
+    int total_cards = switch2GroupsCount() + 1;
+    int total_rows = (total_cards + GROUPS_COLS - 1) / GROUPS_COLS;
+    return (total_rows > 2) ? (float)(total_rows - 2) * GROUPS_STRIDE_Y : 0.0f;
+}
+
+/* Prompts for a virtual group name using Switch 2 swkbd (with safe fallback in Applet Mode) */
+static bool promptGroupName(const char *header, const char *initial, char *out, size_t out_sz) {
+    if (!out || out_sz < 2)
+        return false;
+    out[0] = '\0';
+#ifdef __SWITCH__
+    SwkbdConfig kbd;
+    if (R_SUCCEEDED(swkbdCreate(&kbd, 0))) {
+        swkbdConfigMakePresetDefault(&kbd);
+        if (header && header[0])
+            swkbdConfigSetHeaderText(&kbd, header);
+        if (initial && initial[0])
+            swkbdConfigSetInitialText(&kbd, initial);
+        swkbdConfigSetStringLenMax(&kbd, S2_GROUP_NAME_MAX - 1);
+        Result rc = swkbdShow(&kbd, out, out_sz);
+        swkbdClose(&kbd);
+        if (R_SUCCEEDED(rc)) {
+            /* Trim leading/trailing spaces */
+            char *p = out;
+            while (*p == ' ' || *p == '\t') p++;
+            if (p != out) memmove(out, p, strlen(p) + 1);
+            size_t len = strlen(out);
+            while (len > 0 && (out[len - 1] == ' ' || out[len - 1] == '\t'))
+                out[--len] = '\0';
+            return len > 0;
+        }
+        return false;
+    }
+#endif
+    if (initial && initial[0]) {
+        snprintf(out, out_sz, "%s", initial);
+    } else {
+        snprintf(out, out_sz, "Group %d", switch2GroupsCount() + 1);
+    }
+    return true;
+}
+
+static void openGroupPicker(menuEntry_s *me) {
+    if (!me || me->type != ENTRY_TYPE_FILE)
+        return;
+    snprintf(s_group_picker_path, sizeof(s_group_picker_path), "%s", me->path);
+    snprintf(s_group_picker_name, sizeof(s_group_picker_name), "%s", me->name);
+    s_group_picker_sel = 0;
+    s_group_picker_scroll = 0;
+    s_group_picker_open = true;
+    switch2SfxPlay(S2Sfx_Confirm);
 }
 
 static float carouselMaxScroll(void) {
-    int total_slots = s_visible_count + (hasEndAllSoftwareTile() ? 1 : 0);
+    int total_slots = inlineGroupsCount() + s_visible_count + (hasEndAllSoftwareTile() ? 1 : 0);
     float content_w = CAROUSEL_START_X * 2.0f + (float)total_slots * CAROUSEL_STRIDE - (CAROUSEL_STRIDE - CAROUSEL_TILE_SZ);
     float max_scroll = content_w - SCREEN_W;
     return max_scroll > 0.0f ? max_scroll : 0.0f;
 }
 
 static float gridMaxScrollY(void) {
-    int total_rows = (s_visible_count + GRID_COLS - 1) / GRID_COLS;
+    int content_slots = inlineGroupsCount() + s_visible_count;
+    int total_rows = (content_slots + GRID_COLS - 1) / GRID_COLS;
     return (total_rows > 2) ? (float)(total_rows - 2) * GRID_STRIDE_Y : 0.0f;
 }
 
@@ -633,11 +745,23 @@ static void rebuildVisibleList(menu_s *menu) {
     s_visible_count = 0;
     if (!menu) return;
 
-    bool filter_fav = s_favorites_only && !menuIsThemeMenuActive();
+    if (s_active_group >= switch2GroupsCount())
+        s_active_group = -1;
+
+    bool theme_active = menuIsThemeMenuActive();
+    bool filter_group = (!theme_active && s_active_group >= 0);
+    bool filter_fav   = (!theme_active && !filter_group && s_favorites_only);
+    bool hide_grouped = (!theme_active && !filter_group && !filter_fav &&
+                         s_cfg.hide_grouped && switch2GroupsCount() > 0);
+
     VisiblePair pairs[MAX_VISIBLE_ENTRIES];
     int idx = 0;
     for (menuEntry_s *me = menu->firstEntry; me && s_visible_count < MAX_VISIBLE_ENTRIES; me = me->next, idx++) {
+        if (filter_group && !switch2GroupContains(s_active_group, me->path))
+            continue;
         if (filter_fav && !me->starred)
+            continue;
+        if (hide_grouped && me->type == ENTRY_TYPE_FILE && switch2GroupsHasAppInAny(me->path))
             continue;
         pairs[s_visible_count].me = me;
         pairs[s_visible_count].orig_idx = idx;
@@ -653,30 +777,34 @@ static void rebuildVisibleList(menu_s *menu) {
         s_visible_indices[i] = pairs[i].orig_idx;
     }
 
-    int max_sel = hasEndAllSoftwareTile() ? s_visible_count : (s_visible_count > 0 ? s_visible_count - 1 : 0);
+    int gc = inlineGroupsCount();
+    int content_slots = gc + s_visible_count;
+    int max_sel = hasEndAllSoftwareTile() ? content_slots : (content_slots > 0 ? content_slots - 1 : 0);
     if (s_sel > max_sel) s_sel = max_sel;
     if (s_sel < 0) s_sel = 0;
 
-    if (s_visible_count > 0 && s_sel < s_visible_count) {
-        menu->curEntry = s_visible_indices[s_sel];
+    if (s_visible_count > 0 && s_sel >= gc && s_sel < content_slots) {
+        menu->curEntry = s_visible_indices[s_sel - gc];
     }
 }
 
 static void syncSelectionFromMenu(menu_s *menu) {
     rebuildVisibleList(menu);
+    int gc = inlineGroupsCount();
     if (!menu || s_visible_count == 0) {
-        s_sel = 0;
+        if (gc == 0) s_sel = 0;
         return;
     }
     for (int i = 0; i < s_visible_count; i++) {
         if (s_visible_indices[i] == menu->curEntry) {
-            s_sel = i;
+            s_sel = gc + i;
             return;
         }
     }
-    if (s_sel >= s_visible_count)
-        s_sel = s_visible_count - 1;
-    menu->curEntry = s_visible_indices[s_sel];
+    if (s_sel >= gc + s_visible_count)
+        s_sel = gc + s_visible_count - 1;
+    if (s_sel >= gc)
+        menu->curEntry = s_visible_indices[s_sel - gc];
 }
 
 /* Unified entry activation (handles Audit Fix #1 + Switch 2 launch animation + BGM fade-out) */
@@ -687,9 +815,10 @@ static void activateEntry(menu_s *menu, int vis_idx) {
     menu->curEntry = s_visible_indices[vis_idx];
 
     if (me->type == ENTRY_TYPE_FOLDER) {
-        /* Audit Fix #1: reset Favorites filter & scroll when entering a subfolder */
+        /* Audit Fix #1: reset Favorites/Group filter & scroll when entering a subfolder */
         switch2SfxPlay(S2Sfx_Confirm);
         s_favorites_only = false;
+        s_active_group = -1;
         s_scroll_x = 0.0f;
         s_grid_scroll_y = 0.0f;
         s_sel = 0;
@@ -722,7 +851,7 @@ static void openSettingsView(void) {
         s_scroll_x = 0.0f;
     }
     rescanMediaLists();
-    s_prev_view = (s_view == S2View_Grid) ? S2View_Grid : S2View_Carousel;
+    s_prev_view = (s_view == S2View_Grid || s_view == S2View_Groups) ? s_view : S2View_Carousel;
     s_view = S2View_Settings;
     s_settings_sel = 0;
     s_settings_scroll = 0;
@@ -741,6 +870,9 @@ static void triggerPillAction(int idx) {
     case PILL_FAVORITES:
         if (!menuIsThemeMenuActive()) {
             switch2SfxPlay(S2Sfx_Confirm);
+            if (s_view == S2View_Groups)
+                s_view = S2View_Carousel;
+            s_active_group = -1;
             s_favorites_only = !s_favorites_only;
             s_sel = 0;
             s_scroll_x = 0.0f;
@@ -754,7 +886,12 @@ static void triggerPillAction(int idx) {
     case PILL_ALL_SOFTWARE:
         if (!menuIsThemeMenuActive()) {
             switch2SfxPlay(S2Sfx_Confirm);
-            s_view = (s_view == S2View_Carousel) ? S2View_Grid : S2View_Carousel;
+            if (s_view == S2View_Groups) {
+                s_active_group = -1;
+                s_view = S2View_Grid;
+            } else {
+                s_view = (s_view == S2View_Carousel) ? S2View_Grid : S2View_Carousel;
+            }
             if (s_sel >= s_visible_count && s_visible_count > 0)
                 s_sel = s_visible_count - 1;
             s_focus = S2Focus_Apps;
@@ -763,6 +900,7 @@ static void triggerPillAction(int idx) {
         break;
     case PILL_THEMES:
         switch2SfxPlay(S2Sfx_Confirm);
+        s_active_group = -1;
         if (menuIsThemeMenuActive()) {
             launchMenuBackTask();
             s_view = S2View_Carousel;
@@ -840,6 +978,14 @@ static void drawTopBar(menu_s *menu) {
     if (menuIsThemeMenuActive()) {
         tag_text = "Themes";
         tag_bg = makeRGBA(124, 92, 255, 255);
+        tag_fg = MakeColor(255, 255, 255, 255);
+    } else if (s_view == S2View_Groups) {
+        tag_text = "Groups";
+        tag_bg = makeRGBA(28, 178, 146, 255);
+        tag_fg = MakeColor(255, 255, 255, 255);
+    } else if (s_active_group >= 0 && s_active_group < switch2GroupsCount()) {
+        tag_text = switch2GroupName(s_active_group);
+        tag_bg = makeRGBA(28, 178, 146, 255);
         tag_fg = MakeColor(255, 255, 255, 255);
     } else if (s_favorites_only) {
         tag_text = "Favorites";
@@ -1093,13 +1239,115 @@ static void drawFocusedHeaderInfo(menuEntry_s *me, float center_x, float title_y
     }
 }
 
-static void drawCarouselView(void) {
-    int total_slots = s_visible_count + (hasEndAllSoftwareTile() ? 1 : 0);
+static void drawGroupTileSquare(menu_s *menu, int group_idx, float x, float y, float size, bool is_focused, float pop_amount) {
+    bool dark = isDarkTheme();
+    float scale = is_focused ? (1.0f + 0.026f * pop_amount) : 1.0f;
+    float draw_sz = size * scale;
+    float dx = x - (draw_sz - size) * 0.5f;
+    float dy = y - (draw_sz - size) * 0.5f;
+    float radius = draw_sz * 0.072f;
 
-    if (s_visible_count == 0) {
-        const char *msg = s_favorites_only
-            ? "No favorite apps yet. Press X on an app to add it to Favorites."
-            : textGetString(StrId_NoAppsFound_Msg);
+    renderSoftShadowF(dx, dy + (is_focused ? 7.0f : 3.0f), draw_sz, draw_sz,
+                      radius, is_focused ? 14.0f : 7.0f,
+                      dark ? (is_focused ? 120 : 55) : (is_focused ? 65 : 30));
+
+    uint32_t card_bg = dark ? makeRGBA(42, 44, 52, 255) : makeRGBA(246, 248, 252, 255);
+    renderRoundedRectF(dx, dy, draw_sz, draw_sz, radius, card_bg);
+
+    /* 2x2 Mosaic of up to 4 app icons inside the square tile */
+    menuEntry_s *icons[4] = { NULL, NULL, NULL, NULL };
+    int icon_n = switch2GroupCollectIcons(group_idx, menu, icons, 4);
+    int present_n = switch2GroupCountPresent(group_idx, menu);
+
+    int img_w = 256, img_h = 256;
+    const ThemeLayoutObject *largeobj = &themeCurrent.layoutObjects[ThemeLayoutId_MenuActiveEntryIcon];
+    if (largeobj->size[0] > 0 && largeobj->size[1] > 0) {
+        img_w = largeobj->size[0];
+        img_h = largeobj->size[1];
+    }
+
+    float pad_in = draw_sz * 0.08f;
+    float gap = draw_sz * 0.045f;
+    float cell = (draw_sz - pad_in * 2.0f - gap) * 0.5f;
+    uint32_t slot_bg = dark ? makeRGBA(58, 60, 70, 230) : makeRGBA(226, 230, 238, 240);
+
+    for (int k = 0; k < 4; k++) {
+        float sx = dx + pad_in + (float)(k % 2) * (cell + gap);
+        float sy = dy + pad_in + (float)(k / 2) * (cell + gap);
+        renderRoundedRectF(sx, sy, cell, cell, cell * 0.14f, slot_bg);
+        if (k < icon_n && icons[k]) {
+            menuEntry_s *me = icons[k];
+            const uint8_t *img = me->icon_gfx ? me->icon_gfx : invalid_icon_large;
+            enum RenderImageFormat fmt = (me->icon_gfx && me->icon_mode == IMAGE_MODE_RGB24)
+                ? RenderImageFormat_Rgb24Rounded : RenderImageFormat_Rgba32Rounded;
+            if (img)
+                renderImageScaledF(img, img_w, img_h, sx, sy, cell, cell, fmt, 0xffffffffu);
+        }
+    }
+
+    /* Count pill badge in bottom-right corner */
+    char cntBuf[16];
+    snprintf(cntBuf, sizeof(cntBuf), "%d", present_n);
+    uint32_t cw = 0, ch = 0;
+    GetTextDimensions(interuiregular14, cntBuf, &cw, &ch);
+    float bw = (float)cw + 14.0f;
+    if (bw < 24.0f) bw = 24.0f;
+    float bh = 22.0f;
+    float bx = dx + draw_sz - bw - 8.0f;
+    float by = dy + draw_sz - bh - 8.0f;
+    renderRoundedRectF(bx, by, bw, bh, bh * 0.5f, makeRGBA(28, 178, 146, 235));
+    DrawText(interuiregular14, (uint32_t)(bx + (bw - (float)cw) * 0.5f),
+             (uint32_t)(by + bh * 0.5f + fontBaselineOffset(interuiregular14)),
+             MakeColor(255, 255, 255, 255), cntBuf);
+
+    if (is_focused) {
+        float pad = 6.5f;
+        uint32_t rc1 = 0, rc2 = 0;
+        getFocusRingColors(&rc1, &rc2);
+        renderSwitch2FocusRingF(dx - pad, dy - pad, draw_sz + pad * 2.0f, draw_sz + pad * 2.0f,
+                                radius + pad, 4.0f, ringTimer(), rc1, rc2);
+    }
+}
+
+static void drawGroupHeaderInfo(menu_s *menu, int group_idx, float center_x, float title_y) {
+    bool dark = isDarkTheme();
+    color_t title_col = getAccentColor(dark);
+    color_t muted = makeColorMuted(themeCurrent.textColor, dark ? 165 : 155);
+
+    const char *gname = switch2GroupName(group_idx);
+    uint32_t max_w = 620;
+    uint32_t tw = 0, th = 0;
+    GetTextDimensions(interuimedium20, gname, &tw, &th);
+    if (tw > max_w) tw = max_w;
+    float tx = center_x - (float)tw * 0.5f;
+    if (tx < 48.0f) tx = 48.0f;
+    if (tx + (float)tw > SCREEN_W - 48.0f) tx = SCREEN_W - 48.0f - (float)tw;
+    DrawTextTruncate(interuimedium20, (uint32_t)tx, (uint32_t)title_y, title_col, gname, max_w, "...");
+
+    if (!s_cfg.show_subtitle)
+        return;
+    int n = switch2GroupCountPresent(group_idx, menu);
+    char subBuf[64];
+    snprintf(subBuf, sizeof(subBuf), "Group  \u00B7  %d %s", n, n == 1 ? "app" : "apps");
+    uint32_t sw = 0, sh = 0;
+    GetTextDimensions(interuiregular14, subBuf, &sw, &sh);
+    float sx = center_x - (float)sw * 0.5f;
+    if (sx < 48.0f) sx = 48.0f;
+    if (sx + (float)sw > SCREEN_W - 48.0f) sx = SCREEN_W - 48.0f - (float)sw;
+    DrawText(interuiregular14, (uint32_t)sx, (uint32_t)(title_y + 24.0f), muted, subBuf);
+}
+
+static void drawCarouselView(menu_s *menu) {
+    int gc = inlineGroupsCount();
+    int content_slots = gc + s_visible_count;
+    int total_slots = content_slots + (hasEndAllSoftwareTile() ? 1 : 0);
+
+    if (content_slots == 0) {
+        const char *msg = (s_active_group >= 0)
+            ? "This group is empty. Press R on any app to add it here."
+            : (s_favorites_only
+                ? "No favorite apps yet. Press X on an app to add it to Favorites."
+                : textGetString(StrId_NoAppsFound_Msg));
         uint32_t mw = 0, mh = 0;
         GetTextDimensions(interuiregular18, msg, &mw, &mh);
         DrawText(interuiregular18, (uint32_t)((SCREEN_W - (float)mw) * 0.5f), 315,
@@ -1135,18 +1383,22 @@ static void drawCarouselView(void) {
         bool is_active = (s_focus == S2Focus_Apps && i == s_sel);
         if (is_active)
             continue;
-        if (i < s_visible_count)
-            drawAppTile(s_visible[i], tx, tile_y, CAROUSEL_TILE_SZ, false, 0.0f);
+        if (i < gc)
+            drawGroupTileSquare(menu, i, tx, tile_y, CAROUSEL_TILE_SZ, false, 0.0f);
+        else if (i < content_slots)
+            drawAppTile(s_visible[i - gc], tx, tile_y, CAROUSEL_TILE_SZ, false, 0.0f);
         else
             drawAllSoftwareEndTile(tx, tile_y, CAROUSEL_TILE_SZ, false, 0.0f);
     }
 
     if (s_focus == S2Focus_Apps && s_sel >= 0 && s_sel < total_slots) {
         float focused_x = CAROUSEL_START_X + (float)s_sel * CAROUSEL_STRIDE - s_scroll_x;
-        bool is_end_tile = (s_sel == s_visible_count);
-        if (!is_end_tile) {
-            drawAppTile(s_visible[s_sel], focused_x, tile_y, CAROUSEL_TILE_SZ, true, s_app_pop);
-            drawFocusedHeaderInfo(s_visible[s_sel], focused_x + CAROUSEL_TILE_SZ * 0.5f, 152.0f + slide_y, false);
+        if (s_sel < gc) {
+            drawGroupTileSquare(menu, s_sel, focused_x, tile_y, CAROUSEL_TILE_SZ, true, s_app_pop);
+            drawGroupHeaderInfo(menu, s_sel, focused_x + CAROUSEL_TILE_SZ * 0.5f, 152.0f + slide_y);
+        } else if (s_sel < content_slots) {
+            drawAppTile(s_visible[s_sel - gc], focused_x, tile_y, CAROUSEL_TILE_SZ, true, s_app_pop);
+            drawFocusedHeaderInfo(s_visible[s_sel - gc], focused_x + CAROUSEL_TILE_SZ * 0.5f, 152.0f + slide_y, false);
         } else {
             drawAllSoftwareEndTile(focused_x, tile_y, CAROUSEL_TILE_SZ, true, s_app_pop);
             drawFocusedHeaderInfo(NULL, focused_x + CAROUSEL_TILE_SZ * 0.5f, 162.0f + slide_y, true);
@@ -1154,13 +1406,15 @@ static void drawCarouselView(void) {
     }
 }
 
-static void drawGridView(void) {
-    if (s_visible_count == 0) {
-        drawCarouselView();
+static void drawGridView(menu_s *menu) {
+    int gc = inlineGroupsCount();
+    int content_slots = gc + s_visible_count;
+    if (content_slots == 0) {
+        drawCarouselView(menu);
         return;
     }
 
-    if (s_sel >= s_visible_count) s_sel = s_visible_count - 1;
+    if (s_sel >= content_slots) s_sel = content_slots - 1;
     int sel_row = s_sel / GRID_COLS;
     float max_scroll_y = gridMaxScrollY();
     if (!s_touch_active) {
@@ -1170,7 +1424,7 @@ static void drawGridView(void) {
     }
 
     float slide_y = transSlideOffset();
-    for (int i = 0; i < s_visible_count; i++) {
+    for (int i = 0; i < content_slots; i++) {
         int col = i % GRID_COLS;
         int row = i / GRID_COLS;
         float tx = GRID_START_X + (float)col * GRID_STRIDE_X;
@@ -1179,16 +1433,23 @@ static void drawGridView(void) {
             continue;
         if (s_focus == S2Focus_Apps && i == s_sel)
             continue;
-        drawAppTile(s_visible[i], tx, ty, GRID_TILE_SZ, false, 0.0f);
+        if (i < gc)
+            drawGroupTileSquare(menu, i, tx, ty, GRID_TILE_SZ, false, 0.0f);
+        else
+            drawAppTile(s_visible[i - gc], tx, ty, GRID_TILE_SZ, false, 0.0f);
     }
 
-    if (s_focus == S2Focus_Apps && s_sel >= 0 && s_sel < s_visible_count) {
+    if (s_focus == S2Focus_Apps && s_sel >= 0 && s_sel < content_slots) {
         int col = s_sel % GRID_COLS;
         int row = s_sel / GRID_COLS;
         float tx = GRID_START_X + (float)col * GRID_STRIDE_X;
         float ty = GRID_START_Y + (float)row * GRID_STRIDE_Y - s_grid_scroll_y + slide_y;
-        if (ty + GRID_TILE_SZ >= GRID_CLIP_TOP - 20.0f && ty <= GRID_CLIP_BOTTOM + 20.0f)
-            drawAppTile(s_visible[s_sel], tx, ty, GRID_TILE_SZ, true, s_app_pop);
+        if (ty + GRID_TILE_SZ >= GRID_CLIP_TOP - 20.0f && ty <= GRID_CLIP_BOTTOM + 20.0f) {
+            if (s_sel < gc)
+                drawGroupTileSquare(menu, s_sel, tx, ty, GRID_TILE_SZ, true, s_app_pop);
+            else
+                drawAppTile(s_visible[s_sel - gc], tx, ty, GRID_TILE_SZ, true, s_app_pop);
+        }
     }
 
     /* Top & bottom occlusion bands (semi-transparent when wallpaper is active) */
@@ -1197,9 +1458,259 @@ static void drawGridView(void) {
     renderRectF(0.0f, 0.0f, SCREEN_W, GRID_CLIP_TOP, bg_band);
     renderRectF(0.0f, GRID_CLIP_BOTTOM, SCREEN_W, SCREEN_H - GRID_CLIP_BOTTOM, bg_band);
 
-    if (s_focus == S2Focus_Apps && s_sel < s_visible_count) {
-        drawFocusedHeaderInfo(s_visible[s_sel], SCREEN_W * 0.5f, 112.0f, false);
+    if (s_focus == S2Focus_Apps && s_sel < content_slots) {
+        if (s_sel < gc)
+            drawGroupHeaderInfo(menu, s_sel, SCREEN_W * 0.5f, 112.0f);
+        else
+            drawFocusedHeaderInfo(s_visible[s_sel - gc], SCREEN_W * 0.5f, 112.0f, false);
     }
+}
+
+static void drawGroupCard(menu_s *menu, int group_idx, float x, float y, bool is_focused, float pop_amount) {
+    bool dark = isDarkTheme();
+    bool is_new_card = (group_idx >= switch2GroupsCount());
+    float scale = is_focused ? (1.0f + 0.028f * pop_amount) : 1.0f;
+    float dw = GROUPS_CARD_W * scale;
+    float dh = GROUPS_CARD_H * scale;
+    float dx = x - (dw - GROUPS_CARD_W) * 0.5f;
+    float dy = y - (dh - GROUPS_CARD_H) * 0.5f;
+    float radius = 16.0f * scale;
+
+    renderSoftShadowF(dx, dy + (is_focused ? 7.0f : 3.0f), dw, dh,
+                      radius, is_focused ? 14.0f : 7.0f,
+                      dark ? (is_focused ? 120 : 55) : (is_focused ? 65 : 30));
+
+    uint32_t card_bg = dark ? makeRGBA(40, 42, 50, 248) : makeRGBA(255, 255, 255, 250);
+    renderRoundedRectF(dx, dy, dw, dh, radius, card_bg);
+
+    color_t txt = themeCurrent.textColor;
+    color_t muted = makeColorMuted(txt, dark ? 165 : 155);
+    color_t accent = getAccentColor(dark);
+
+    if (is_new_card) {
+        float cx = dx + dw * 0.5f;
+        float cy = dy + dh * 0.42f;
+        uint32_t plus_col = is_focused ? (accent.abgr | 0xff000000u)
+                                       : (dark ? makeRGBA(175, 180, 192, 255) : makeRGBA(110, 116, 128, 255));
+        float arm = 22.0f * scale;
+        float thick = 5.0f * scale;
+        renderRoundedRectF(cx - arm, cy - thick * 0.5f, arm * 2.0f, thick, thick * 0.5f, plus_col);
+        renderRoundedRectF(cx - thick * 0.5f, cy - arm, thick, arm * 2.0f, thick * 0.5f, plus_col);
+
+        const char *lbl = "New Group";
+        uint32_t lw = 0, lh = 0;
+        GetTextDimensions(interuiregular18, lbl, &lw, &lh);
+        DrawText(interuiregular18, (uint32_t)(cx - (float)lw * 0.5f),
+                 (uint32_t)(dy + dh - 26.0f * scale), is_focused ? accent : muted, lbl);
+    } else {
+        /* 2x2 Mosaic of up to 4 app icons */
+        menuEntry_s *icons[4] = { NULL, NULL, NULL, NULL };
+        int icon_n = switch2GroupCollectIcons(group_idx, menu, icons, 4);
+        int present_n = switch2GroupCountPresent(group_idx, menu);
+
+        int img_w = 256, img_h = 256;
+        const ThemeLayoutObject *largeobj = &themeCurrent.layoutObjects[ThemeLayoutId_MenuActiveEntryIcon];
+        if (largeobj->size[0] > 0 && largeobj->size[1] > 0) {
+            img_w = largeobj->size[0];
+            img_h = largeobj->size[1];
+        }
+
+        float cell = 60.0f * scale;
+        float gap = 8.0f * scale;
+        float grid_w = cell * 2.0f + gap;
+        float gx0 = dx + (dw - grid_w) * 0.5f;
+        float gy0 = dy + 14.0f * scale;
+        uint32_t slot_bg = dark ? makeRGBA(54, 56, 66, 220) : makeRGBA(234, 236, 242, 235);
+
+        for (int k = 0; k < 4; k++) {
+            float sx = gx0 + (float)(k % 2) * (cell + gap);
+            float sy = gy0 + (float)(k / 2) * (cell + gap);
+            renderRoundedRectF(sx, sy, cell, cell, 8.0f * scale, slot_bg);
+            if (k < icon_n && icons[k]) {
+                menuEntry_s *me = icons[k];
+                const uint8_t *img = me->icon_gfx ? me->icon_gfx : invalid_icon_large;
+                enum RenderImageFormat fmt = (me->icon_gfx && me->icon_mode == IMAGE_MODE_RGB24)
+                    ? RenderImageFormat_Rgb24Rounded : RenderImageFormat_Rgba32Rounded;
+                if (img)
+                    renderImageScaledF(img, img_w, img_h, sx, sy, cell, cell, fmt, 0xffffffffu);
+            }
+        }
+
+        /* Group name & app count footer inside card */
+        float foot_y = dy + dh - 20.0f * scale;
+        if (s_group_delete_armed == group_idx) {
+            const char *warn = "Press Y to delete";
+            uint32_t ww = 0, wh = 0;
+            GetTextDimensions(interuiregular14, warn, &ww, &wh);
+            DrawText(interuiregular14, (uint32_t)(dx + (dw - (float)ww) * 0.5f),
+                     (uint32_t)foot_y, MakeColor(245, 76, 86, 255), warn);
+        } else {
+            char cntBuf[16];
+            snprintf(cntBuf, sizeof(cntBuf), "%d", present_n);
+            uint32_t cw = 0, ch = 0;
+            GetTextDimensions(interuiregular14, cntBuf, &cw, &ch);
+            float cnt_x = dx + dw - 16.0f * scale - (float)cw;
+            DrawText(interuiregular14, (uint32_t)cnt_x, (uint32_t)foot_y, muted, cntBuf);
+
+            float max_name_w = (cnt_x - (dx + 16.0f * scale)) - 8.0f;
+            if (max_name_w < 40.0f) max_name_w = 40.0f;
+            DrawTextTruncate(interuiregular14, (uint32_t)(dx + 16.0f * scale), (uint32_t)foot_y,
+                             is_focused ? accent : txt, switch2GroupName(group_idx),
+                             (uint32_t)max_name_w, "...");
+        }
+    }
+
+    if (is_focused) {
+        float pad = 6.0f;
+        uint32_t rc1 = 0, rc2 = 0;
+        getFocusRingColors(&rc1, &rc2);
+        renderSwitch2FocusRingF(dx - pad, dy - pad, dw + pad * 2.0f, dh + pad * 2.0f,
+                                radius + pad, 4.0f, ringTimer(), rc1, rc2);
+    }
+}
+
+static void drawGroupsView(menu_s *menu) {
+    int gcount = switch2GroupsCount();
+    int total_cards = gcount + 1;
+    if (s_group_sel >= total_cards) s_group_sel = total_cards - 1;
+    if (s_group_sel < 0) s_group_sel = 0;
+
+    int sel_row = s_group_sel / GROUPS_COLS;
+    float max_scroll = groupsMaxScrollY();
+    if (!s_touch_active) {
+        float target_y = (sel_row > 0) ? (float)(sel_row - 1) * GROUPS_STRIDE_Y : 0.0f;
+        if (target_y > max_scroll) target_y = max_scroll;
+        s_groups_scroll_y += (target_y - s_groups_scroll_y) * 0.22f;
+    }
+
+    float slide_y = transSlideOffset();
+    for (int i = 0; i < total_cards; i++) {
+        int col = i % GROUPS_COLS;
+        int row = i / GROUPS_COLS;
+        float tx = GROUPS_START_X + (float)col * GROUPS_STRIDE_X;
+        float ty = GROUPS_START_Y + (float)row * GROUPS_STRIDE_Y - s_groups_scroll_y + slide_y;
+        if (ty + GROUPS_CARD_H < GROUPS_CLIP_TOP - 24.0f || ty > GROUPS_CLIP_BOT + 24.0f)
+            continue;
+        if (s_focus == S2Focus_Apps && i == s_group_sel)
+            continue;
+        drawGroupCard(menu, i, tx, ty, false, 0.0f);
+    }
+
+    if (s_focus == S2Focus_Apps && s_group_sel >= 0 && s_group_sel < total_cards) {
+        int col = s_group_sel % GROUPS_COLS;
+        int row = s_group_sel / GROUPS_COLS;
+        float tx = GROUPS_START_X + (float)col * GROUPS_STRIDE_X;
+        float ty = GROUPS_START_Y + (float)row * GROUPS_STRIDE_Y - s_groups_scroll_y + slide_y;
+        if (ty + GROUPS_CARD_H >= GROUPS_CLIP_TOP - 24.0f && ty <= GROUPS_CLIP_BOT + 24.0f)
+            drawGroupCard(menu, s_group_sel, tx, ty, true, s_app_pop);
+    }
+
+    /* Top & bottom occlusion bands */
+    uint8_t band_a = switch2WallpaperIsLoaded() ? 205 : 255;
+    uint32_t bg_band = (themeCurrent.backgroundColor.abgr & 0x00ffffffu) | ((uint32_t)band_a << 24);
+    renderRectF(0.0f, 0.0f, SCREEN_W, GROUPS_CLIP_TOP, bg_band);
+    renderRectF(0.0f, GROUPS_CLIP_BOT, SCREEN_W, SCREEN_H - GROUPS_CLIP_BOT, bg_band);
+
+    /* Centered header info for focused group */
+    if (s_focus == S2Focus_Apps) {
+        bool dark = isDarkTheme();
+        color_t accent = getAccentColor(dark);
+        color_t muted = makeColorMuted(themeCurrent.textColor, dark ? 165 : 155);
+        char titleBuf[S2_GROUP_NAME_MAX + 32];
+        char subBuf[96];
+        if (s_group_sel < gcount) {
+            snprintf(titleBuf, sizeof(titleBuf), "%s", switch2GroupName(s_group_sel));
+            int n = switch2GroupCountPresent(s_group_sel, menu);
+            snprintf(subBuf, sizeof(subBuf), "%d %s", n, n == 1 ? "app" : "apps");
+        } else {
+            snprintf(titleBuf, sizeof(titleBuf), "New Group");
+            snprintf(subBuf, sizeof(subBuf), "Organize homebrew without moving SD files");
+        }
+        uint32_t tw = 0, th = 0, sw = 0, sh = 0;
+        GetTextDimensions(interuimedium20, titleBuf, &tw, &th);
+        if (tw > 620) tw = 620;
+        DrawTextTruncate(interuimedium20, (uint32_t)(SCREEN_W * 0.5f - (float)tw * 0.5f), 108,
+                         accent, titleBuf, 620, "...");
+        GetTextDimensions(interuiregular14, subBuf, &sw, &sh);
+        DrawText(interuiregular14, (uint32_t)(SCREEN_W * 0.5f - (float)sw * 0.5f), 130, muted, subBuf);
+    }
+}
+
+static void drawGroupPickerOverlay(void) {
+    bool dark = isDarkTheme();
+    color_t txt = themeCurrent.textColor;
+    color_t muted = makeColorMuted(txt, dark ? 165 : 155);
+    color_t accent = getAccentColor(dark);
+    uint32_t sep_col = dark ? makeRGBA(62, 64, 72, 220) : makeRGBA(212, 215, 222, 220);
+
+    /* Dimmed full-screen backdrop */
+    renderRectF(0.0f, 0.0f, SCREEN_W, SCREEN_H, makeRGBA(0, 0, 0, 150));
+
+    /* Centered Switch 2 modal card */
+    uint32_t modal_bg = dark ? makeRGBA(34, 36, 44, 252) : makeRGBA(248, 250, 254, 252);
+    renderSoftShadowF(PICKER_X, PICKER_Y + 8.0f, PICKER_W, PICKER_H, 18.0f, 22.0f, 120);
+    renderRoundedRectF(PICKER_X, PICKER_Y, PICKER_W, PICKER_H, 18.0f, modal_bg);
+
+    DrawText(interuimedium20, (uint32_t)(PICKER_X + 28.0f), (uint32_t)(PICKER_Y + 42.0f), txt, "Add to Group");
+    DrawTextTruncate(interuiregular14, (uint32_t)(PICKER_X + 28.0f), (uint32_t)(PICKER_Y + 66.0f),
+                     muted, s_group_picker_name, (uint32_t)(PICKER_W - 56.0f), "...");
+    renderRectF(PICKER_X + 20.0f, PICKER_Y + 82.0f, PICKER_W - 40.0f, 1.0f, sep_col);
+
+    int gcount = switch2GroupsCount();
+    int total_rows = gcount + 1; /* last row = "+ Create New Group" */
+    if (s_group_picker_sel >= total_rows) s_group_picker_sel = total_rows - 1;
+    if (s_group_picker_sel < 0) s_group_picker_sel = 0;
+    if (s_group_picker_sel < s_group_picker_scroll) s_group_picker_scroll = s_group_picker_sel;
+    if (s_group_picker_sel >= s_group_picker_scroll + PICKER_MAX_ROWS)
+        s_group_picker_scroll = s_group_picker_sel - PICKER_MAX_ROWS + 1;
+    if (s_group_picker_scroll < 0) s_group_picker_scroll = 0;
+
+    int vis = total_rows - s_group_picker_scroll;
+    if (vis > PICKER_MAX_ROWS) vis = PICKER_MAX_ROWS;
+
+    float list_y0 = PICKER_Y + 94.0f;
+    for (int r = 0; r < vis; r++) {
+        int idx = s_group_picker_scroll + r;
+        float ry = list_y0 + (float)r * PICKER_ROW_H;
+        float rcy = ry + PICKER_ROW_H * 0.5f;
+        bool focused = (idx == s_group_picker_sel);
+
+        if (focused) {
+            uint32_t row_bg = dark ? makeRGBA(52, 54, 64, 248) : makeRGBA(232, 238, 248, 250);
+            renderRoundedRectF(PICKER_X + 18.0f, ry + 3.0f, PICKER_W - 36.0f, PICKER_ROW_H - 6.0f, 10.0f, row_bg);
+            renderRoundedRectF(PICKER_X + 26.0f, ry + 11.0f, 4.0f, PICKER_ROW_H - 22.0f, 2.0f, accent.abgr | 0xff000000u);
+        }
+
+        if (idx < gcount) {
+            bool member = switch2GroupContains(idx, s_group_picker_path);
+            DrawTextTruncate(interuiregular18, (uint32_t)(PICKER_X + 42.0f),
+                             (uint32_t)(rcy + fontBaselineOffset(interuiregular18)),
+                             focused ? txt : makeColorMuted(txt, dark ? 215 : 205),
+                             switch2GroupName(idx), (uint32_t)(PICKER_W - 180.0f), "...");
+
+            const char *badge = member ? "In Group" : "Add";
+            uint32_t bw = 0, bh = 0;
+            GetTextDimensions(interuiregular14, badge, &bw, &bh);
+            float bx = PICKER_X + PICKER_W - 34.0f - (float)bw;
+            if (member) {
+                renderRoundedRectF(bx - 10.0f, rcy - 12.0f, (float)bw + 20.0f, 24.0f, 12.0f,
+                                   accent.abgr | 0xff000000u);
+                DrawText(interuiregular14, (uint32_t)bx, (uint32_t)(rcy + fontBaselineOffset(interuiregular14)),
+                         MakeColor(20, 22, 26, 255), badge);
+            } else {
+                DrawText(interuiregular14, (uint32_t)bx, (uint32_t)(rcy + fontBaselineOffset(interuiregular14)),
+                         muted, badge);
+            }
+        } else {
+            DrawText(interuiregular18, (uint32_t)(PICKER_X + 42.0f),
+                     (uint32_t)(rcy + fontBaselineOffset(interuiregular18)),
+                     accent, "+ Create New Group");
+        }
+    }
+
+    renderRectF(PICKER_X + 20.0f, PICKER_Y + PICKER_H - 52.0f, PICKER_W - 40.0f, 1.0f, sep_col);
+    DrawText(interuiregular14, (uint32_t)(PICKER_X + 28.0f), (uint32_t)(PICKER_Y + PICKER_H - 22.0f),
+             muted, "A  Toggle / Create      B  Close");
 }
 
 static void drawPillIconSymbol(int idx, float cx, float cy, float scale, uint32_t fg, uint32_t hole_bg) {
@@ -1319,6 +1830,11 @@ static void drawBottomCommandStrip(menu_s *menu) {
     char infoBuf[PATH_MAX + 64];
     if (menuIsThemeMenuActive()) {
         snprintf(infoBuf, sizeof(infoBuf), "Themes (%d)", s_visible_count);
+    } else if (s_view == S2View_Groups) {
+        int gc = switch2GroupsCount();
+        snprintf(infoBuf, sizeof(infoBuf), "Groups (%d)", gc);
+    } else if (s_active_group >= 0 && s_active_group < switch2GroupsCount()) {
+        snprintf(infoBuf, sizeof(infoBuf), "%s (%d)", switch2GroupName(s_active_group), s_visible_count);
     } else if (s_favorites_only) {
         snprintf(infoBuf, sizeof(infoBuf), "Favorites (%d)", s_visible_count);
     } else {
@@ -1343,28 +1859,45 @@ static void drawBottomCommandStrip(menu_s *menu) {
     if (s_focus == S2Focus_Pill) {
         DRAW_PROMPT(themeCurrent.buttonAText, "Select");
         DRAW_PROMPT(themeCurrent.buttonBText, "Back");
+    } else if (s_view == S2View_Groups) {
+        int gcount = switch2GroupsCount();
+        DRAW_PROMPT(themeCurrent.buttonAText, (s_group_sel < gcount) ? "Open" : "Create");
+        if (s_group_sel < gcount) {
+            DRAW_PROMPT(themeCurrent.buttonXText, "Rename");
+            DRAW_PROMPT(themeCurrent.buttonYText, (s_group_delete_armed == s_group_sel) ? "Confirm Delete" : "Delete");
+        }
+        DRAW_PROMPT(themeCurrent.buttonBText, "Back");
     } else {
-        if (s_visible_count > 0) {
-            if (s_sel == s_visible_count) {
+        int gc = inlineGroupsCount();
+        int content_slots = gc + s_visible_count;
+        if (content_slots > 0) {
+            if (s_sel == content_slots) {
                 DRAW_PROMPT(themeCurrent.buttonAText, "All Software");
+            } else if (s_sel < gc) {
+                DRAW_PROMPT(themeCurrent.buttonAText, "Open");
+                DRAW_PROMPT(themeCurrent.buttonXText, "Rename");
             } else {
-                menuEntry_s *me = s_visible[s_sel];
+                menuEntry_s *me = s_visible[s_sel - gc];
                 const char *a_label = (me->type == ENTRY_TYPE_THEME) ? "Apply" :
                                       (me->type == ENTRY_TYPE_FOLDER) ? "Open" : "Launch";
                 DRAW_PROMPT(themeCurrent.buttonAText, a_label);
                 if (me->type != ENTRY_TYPE_THEME) {
                     DRAW_PROMPT(themeCurrent.buttonXText, me->starred ? "Unstar" : "Star");
                 }
+                if (me->type == ENTRY_TYPE_FILE && !menuIsThemeMenuActive()) {
+                    DRAW_PROMPT("R", "Group");
+                }
             }
         }
         bool show_back = menuIsThemeMenuActive() || s_view == S2View_Grid || s_favorites_only ||
+                         s_active_group >= 0 ||
                          (menu && strcmp(menu->dirname, "sdmc:/") != 0 && strcmp(menu->dirname, "/") != 0);
         if (show_back) {
             DRAW_PROMPT(themeCurrent.buttonBText, "Back");
         }
         if (!menuIsThemeMenuActive()) {
+            DRAW_PROMPT("L", "Groups");
             DRAW_PROMPT(themeCurrent.buttonYText, "Netloader");
-            DRAW_PROMPT(themeCurrent.buttonMText, "Themes");
         }
     }
     #undef DRAW_PROMPT
@@ -1377,6 +1910,8 @@ static int getCategoryItems(S2SettingsCat cat, int *out_ids) {
     if (cat == S2Cat_General) {
         out_ids[n++] = SET_DEFAULT_VIEW;
         out_ids[n++] = SET_SORT_ORDER;
+        out_ids[n++] = SET_SHOW_GROUPS_HOME;
+        out_ids[n++] = SET_HIDE_GROUPED;
         out_ids[n++] = SET_SHOW_SUBTITLE;
         out_ids[n++] = SET_BATTERY_PCT;
         out_ids[n++] = SET_CLOCK_FORMAT;
@@ -1405,8 +1940,10 @@ static int getCategoryItems(S2SettingsCat cat, int *out_ids) {
 
 static const char *settingLabel(int id) {
     switch (id) {
-    case SET_DEFAULT_VIEW:   return "Default View";
-    case SET_SORT_ORDER:     return "Sort Order";
+    case SET_DEFAULT_VIEW:     return "Default View";
+    case SET_SORT_ORDER:       return "Sort Order";
+    case SET_SHOW_GROUPS_HOME: return "Show Groups on Home";
+    case SET_HIDE_GROUPED:     return "Hide Grouped Apps";
     case SET_SHOW_SUBTITLE:  return "Show Author & Version";
     case SET_BATTERY_PCT:    return "Battery Percentage";
     case SET_CLOCK_FORMAT:   return "Clock Format";
@@ -1431,11 +1968,22 @@ static const char *settingLabel(int id) {
 
 static void formatSettingValue(int id, char *buf, size_t sz) {
     switch (id) {
-    case SET_DEFAULT_VIEW:
-        snprintf(buf, sz, "%s", s_cfg.default_view ? "All Software" : "Carousel");
+    case SET_DEFAULT_VIEW: {
+        static const char *kViews[4] = {
+            "Carousel", "All Software", "Favorites (Carousel)", "Favorites (Grid)"
+        };
+        int idx = (s_cfg.default_view >= 0 && s_cfg.default_view < 4) ? s_cfg.default_view : 0;
+        snprintf(buf, sz, "%s", kViews[idx]);
         break;
+    }
     case SET_SORT_ORDER:
         snprintf(buf, sz, "%s", s_cfg.sort_order ? "Alphabetical" : "Favorites First");
+        break;
+    case SET_SHOW_GROUPS_HOME:
+        snprintf(buf, sz, "%s", s_cfg.show_groups_home ? "On" : "Off");
+        break;
+    case SET_HIDE_GROUPED:
+        snprintf(buf, sz, "%s", s_cfg.hide_grouped ? "On" : "Off");
         break;
     case SET_SHOW_SUBTITLE:
         snprintf(buf, sz, "%s", s_cfg.show_subtitle ? "On" : "Off");
@@ -1552,10 +2100,25 @@ static void changeSettingById(int id, int delta, bool is_a_press) {
 
     switch (id) {
     case SET_DEFAULT_VIEW:
-        s_cfg.default_view = s_cfg.default_view ? 0 : 1;
+        s_cfg.default_view = (s_cfg.default_view + delta + 4) % 4;
+        s_prev_view = (s_cfg.default_view == 1 || s_cfg.default_view == 3) ? S2View_Grid : S2View_Carousel;
+        s_favorites_only = (s_cfg.default_view == 2 || s_cfg.default_view == 3);
+        s_active_group = -1;
+        s_sel = 0;
+        s_scroll_x = 0.0f;
+        s_grid_scroll_y = 0.0f;
         break;
     case SET_SORT_ORDER:
         s_cfg.sort_order = s_cfg.sort_order ? 0 : 1;
+        break;
+    case SET_SHOW_GROUPS_HOME:
+        s_cfg.show_groups_home = s_cfg.show_groups_home ? 0 : 1;
+        s_sel = 0;
+        s_scroll_x = 0.0f;
+        s_grid_scroll_y = 0.0f;
+        break;
+    case SET_HIDE_GROUPED:
+        s_cfg.hide_grouped = s_cfg.hide_grouped ? 0 : 1;
         break;
     case SET_SHOW_SUBTITLE:
         s_cfg.show_subtitle = s_cfg.show_subtitle ? 0 : 1;
@@ -1578,6 +2141,12 @@ static void changeSettingById(int id, int delta, bool is_a_press) {
         }
         s_reset_armed = false;
         s_cfg = kDefaultCfg;
+        s_prev_view = S2View_Carousel;
+        s_favorites_only = false;
+        s_active_group = -1;
+        s_sel = 0;
+        s_scroll_x = 0.0f;
+        s_grid_scroll_y = 0.0f;
         switch2ApplyThemeSetting();
         switch2ApplyWallpaper();
         switch2ApplySfxPack();
@@ -1768,7 +2337,7 @@ static void drawSettingsView(void) {
         DrawText(interuiregular14, 68, 462, muted, "config/nx-hbmenu/bgm/");
     }
 
-    DrawText(interuiregular14, 68, 550, muted, "Switch 2 HOME UI v2.0");
+    DrawText(interuiregular14, 68, 550, muted, "Switch 2 HOME UI v2.1");
     DrawText(interuiregular14, 68, 572, muted, "by ImDella");
     DrawText(interuiregular14, 68, 594, muted, "Base: ouncebrew / switchbrew");
     DrawText(interuiregular14, 68, 616, muted, "Saved automatically to SD");
@@ -1863,10 +2432,11 @@ static void drawSettingsView(void) {
 }
 
 static void updateAnimations(void) {
-    if (s_sel != s_last_sel || (s_focus == S2Focus_Apps && s_last_focus != S2Focus_Apps)) {
+    int cur_sel = (s_view == S2View_Groups) ? s_group_sel : s_sel;
+    if (cur_sel != s_last_sel || (s_focus == S2Focus_Apps && s_last_focus != S2Focus_Apps)) {
         s_app_pop = 0.0f;
         s_app_pop_vel = 0.28f;
-        s_last_sel = s_sel;
+        s_last_sel = cur_sel;
     }
     if (s_pill_idx != s_last_pill || (s_focus == S2Focus_Pill && s_last_focus != S2Focus_Pill)) {
         s_pill_pop = 0.0f;
@@ -1964,10 +2534,12 @@ void switch2MenuDraw(void) {
     }
 
     if (!menuIsNetloaderActive()) {
-        if (s_view == S2View_Grid && !menuIsThemeMenuActive())
-            drawGridView();
+        if (s_view == S2View_Groups && !menuIsThemeMenuActive())
+            drawGroupsView(menu);
+        else if (s_view == S2View_Grid && !menuIsThemeMenuActive())
+            drawGridView(menu);
         else
-            drawCarouselView();
+            drawCarouselView(menu);
 
         drawTopBar(menu);
         drawBottomPillBar();
@@ -1976,6 +2548,8 @@ void switch2MenuDraw(void) {
     }
 
     drawBottomCommandStrip(menu);
+    if (s_group_picker_open)
+        drawGroupPickerOverlay();
     drawTransitionVeil();
 }
 
@@ -2072,6 +2646,164 @@ bool switch2MenuUpdate(u64 down) {
     if (down & HidNpadButton_Plus)
         return true;
 
+    /* Quick "Add to Group" modal overlay handling */
+    if (s_group_picker_open) {
+        int gcount = switch2GroupsCount();
+        int total_rows = gcount + 1;
+        if (s_group_picker_sel >= total_rows) s_group_picker_sel = total_rows - 1;
+        if (down & HidNpadButton_B) {
+            s_group_picker_open = false;
+            switch2SfxPlay(S2Sfx_Back);
+            return false;
+        }
+        if (down & HidNpadButton_AnyUp) {
+            if (s_group_picker_sel > 0) {
+                s_group_picker_sel--;
+                switch2SfxPlay(S2Sfx_Pill);
+            }
+        } else if (down & HidNpadButton_AnyDown) {
+            if (s_group_picker_sel < total_rows - 1) {
+                s_group_picker_sel++;
+                switch2SfxPlay(S2Sfx_Pill);
+            }
+        } else if (down & HidNpadButton_A) {
+            if (s_group_picker_sel < gcount) {
+                switch2GroupToggleApp(s_group_picker_sel, s_group_picker_path);
+                switch2SfxPlay(S2Sfx_Star);
+                rebuildVisibleList(menu);
+            } else {
+                char name[S2_GROUP_NAME_MAX];
+                if (promptGroupName("New Group Name", "", name, sizeof(name))) {
+                    int gi = switch2GroupCreate(name);
+                    if (gi >= 0) {
+                        switch2GroupToggleApp(gi, s_group_picker_path);
+                        s_group_picker_sel = gi;
+                        switch2SfxPlay(S2Sfx_Confirm);
+                        rebuildVisibleList(menu);
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    /* Pill bar navigation */
+    if (s_focus == S2Focus_Pill) {
+        if (down & HidNpadButton_AnyLeft) {
+            if (s_pill_idx > 0) { s_pill_idx--; switch2SfxPlay(S2Sfx_Pill); }
+        } else if (down & HidNpadButton_AnyRight) {
+            if (s_pill_idx < PILL_COUNT - 1) { s_pill_idx++; switch2SfxPlay(S2Sfx_Pill); }
+        } else if (down & (HidNpadButton_AnyUp | HidNpadButton_B)) {
+            if (s_view == S2View_Groups || (inlineGroupsCount() + s_visible_count) > 0) {
+                s_focus = S2Focus_Apps;
+                switch2SfxPlay(S2Sfx_Move);
+            }
+        } else if (down & HidNpadButton_A) {
+            triggerPillAction(s_pill_idx);
+        }
+        return false;
+    }
+
+    /* Virtual Groups grid navigation */
+    if (s_view == S2View_Groups && !menuIsThemeMenuActive()) {
+        int gcount = switch2GroupsCount();
+        int total_cards = gcount + 1;
+        if (s_group_sel >= total_cards) s_group_sel = total_cards - 1;
+        if (s_group_sel < 0) s_group_sel = 0;
+
+        if (down & (HidNpadButton_B | HidNpadButton_L)) {
+            s_group_delete_armed = -1;
+            s_view = s_groups_return_view;
+            switch2SfxPlay(S2Sfx_Back);
+            return false;
+        }
+        if (down & HidNpadButton_A) {
+            s_group_delete_armed = -1;
+            if (s_group_sel < gcount) {
+                s_active_group = s_group_sel;
+                s_group_opened_from_home = false;
+                s_favorites_only = false;
+                s_view = S2View_Grid;
+                s_sel = 0;
+                s_grid_scroll_y = 0.0f;
+                s_focus = S2Focus_Apps;
+                switch2SfxPlay(S2Sfx_Confirm);
+                rebuildVisibleList(menu);
+            } else {
+                char name[S2_GROUP_NAME_MAX];
+                if (promptGroupName("New Group Name", "", name, sizeof(name))) {
+                    int gi = switch2GroupCreate(name);
+                    if (gi >= 0) {
+                        s_group_sel = gi;
+                        switch2SfxPlay(S2Sfx_Confirm);
+                    }
+                }
+            }
+            return false;
+        }
+        if (down & HidNpadButton_X) {
+            s_group_delete_armed = -1;
+            if (s_group_sel < gcount) {
+                char name[S2_GROUP_NAME_MAX];
+                if (promptGroupName("Rename Group", switch2GroupName(s_group_sel), name, sizeof(name))) {
+                    switch2GroupRename(s_group_sel, name);
+                    switch2SfxPlay(S2Sfx_Confirm);
+                }
+            }
+            return false;
+        }
+        if (down & HidNpadButton_Y) {
+            if (s_group_sel < gcount) {
+                if (s_group_delete_armed == s_group_sel) {
+                    switch2GroupDelete(s_group_sel);
+                    s_group_delete_armed = -1;
+                    int new_max = switch2GroupsCount();
+                    if (s_group_sel > new_max) s_group_sel = new_max;
+                    switch2SfxPlay(S2Sfx_Back);
+                } else {
+                    s_group_delete_armed = s_group_sel;
+                    switch2SfxPlay(S2Sfx_Pill);
+                }
+            }
+            return false;
+        }
+        if (down & HidNpadButton_Minus) {
+            s_group_delete_armed = -1;
+            triggerPillAction(PILL_THEMES);
+            return false;
+        }
+
+        int prev_g = s_group_sel;
+        S2FocusZone prev_f = s_focus;
+        if (down & HidNpadButton_AnyLeft) {
+            if (s_group_sel > 0) s_group_sel--;
+        } else if (down & HidNpadButton_AnyRight) {
+            if (s_group_sel < total_cards - 1) s_group_sel++;
+        } else if (down & HidNpadButton_AnyUp) {
+            if (s_group_sel >= GROUPS_COLS) s_group_sel -= GROUPS_COLS;
+        } else if (down & HidNpadButton_AnyDown) {
+            if (s_group_sel + GROUPS_COLS < total_cards)
+                s_group_sel += GROUPS_COLS;
+            else
+                s_focus = S2Focus_Pill;
+        } else if (down & HidNpadButton_ZL) {
+            s_group_sel -= GROUPS_COLS * 2;
+            if (s_group_sel < 0) s_group_sel = 0;
+        } else if (down & HidNpadButton_ZR) {
+            s_group_sel += GROUPS_COLS * 2;
+            if (s_group_sel >= total_cards) s_group_sel = total_cards - 1;
+        }
+
+        if (s_focus != prev_f) {
+            s_group_delete_armed = -1;
+            switch2SfxPlay(S2Sfx_Pill);
+        } else if (s_group_sel != prev_g) {
+            s_group_delete_armed = -1;
+            switch2SfxPlay(S2Sfx_Move);
+        }
+        return false;
+    }
+
     if (down & HidNpadButton_Y) {
         if (!menuIsThemeMenuActive()) {
             switch2SfxPlay(S2Sfx_Confirm);
@@ -2083,20 +2815,33 @@ bool switch2MenuUpdate(u64 down) {
         triggerPillAction(PILL_THEMES);
         return false;
     }
-
-    /* Pill bar navigation */
-    if (s_focus == S2Focus_Pill) {
-        if (down & HidNpadButton_AnyLeft) {
-            if (s_pill_idx > 0) { s_pill_idx--; switch2SfxPlay(S2Sfx_Pill); }
-        } else if (down & HidNpadButton_AnyRight) {
-            if (s_pill_idx < PILL_COUNT - 1) { s_pill_idx++; switch2SfxPlay(S2Sfx_Pill); }
-        } else if (down & (HidNpadButton_AnyUp | HidNpadButton_B)) {
-            if (s_visible_count > 0) {
-                s_focus = S2Focus_Apps;
-                switch2SfxPlay(S2Sfx_Move);
+    if (down & HidNpadButton_L) {
+        if (!menuIsThemeMenuActive()) {
+            if (menu && strcmp(menu->dirname, menuGetRootPath()) != 0) {
+                menuScan(menuGetRootPath());
+                s_sel = 0;
+                s_scroll_x = 0.0f;
+                s_grid_scroll_y = 0.0f;
             }
-        } else if (down & HidNpadButton_A) {
-            triggerPillAction(s_pill_idx);
+            s_groups_return_view = (s_view == S2View_Grid) ? S2View_Grid : S2View_Carousel;
+            s_active_group = -1;
+            s_favorites_only = false;
+            s_group_delete_armed = -1;
+            s_view = S2View_Groups;
+            s_focus = S2Focus_Apps;
+            switch2SfxPlay(S2Sfx_Confirm);
+        }
+        return false;
+    }
+    int gc = inlineGroupsCount();
+    int content_slots = gc + s_visible_count;
+
+    if (down & HidNpadButton_R) {
+        if (!menuIsThemeMenuActive() && s_visible_count > 0 && s_sel >= gc && s_sel < content_slots) {
+            menuEntry_s *target = s_visible[s_sel - gc];
+            if (target->type == ENTRY_TYPE_FILE) {
+                openGroupPicker(target);
+            }
         }
         return false;
     }
@@ -2104,7 +2849,21 @@ bool switch2MenuUpdate(u64 down) {
     /* App list navigation */
     if (down & HidNpadButton_B) {
         switch2SfxPlay(S2Sfx_Back);
-        if (s_view == S2View_Grid) {
+        if (s_active_group >= 0 && !menuIsThemeMenuActive()) {
+            int prev_g = s_active_group;
+            s_active_group = -1;
+            s_group_delete_armed = -1;
+            if (s_group_opened_from_home) {
+                s_group_opened_from_home = false;
+                s_view = s_groups_return_view;
+                s_sel = prev_g;
+                s_scroll_x = 0.0f;
+                s_grid_scroll_y = 0.0f;
+            } else {
+                s_group_sel = prev_g;
+                s_view = S2View_Groups;
+            }
+        } else if (s_view == S2View_Grid) {
             s_view = S2View_Carousel;
         } else if (s_favorites_only && !menuIsThemeMenuActive()) {
             s_favorites_only = false;
@@ -2120,29 +2879,47 @@ bool switch2MenuUpdate(u64 down) {
     }
 
     if (down & HidNpadButton_A) {
-        if (s_visible_count > 0) {
-            if (s_sel == s_visible_count && hasEndAllSoftwareTile()) {
+        if (content_slots > 0) {
+            if (s_sel == content_slots && hasEndAllSoftwareTile()) {
                 switch2SfxPlay(S2Sfx_Confirm);
                 s_view = S2View_Grid;
-                s_sel = s_visible_count - 1;
-            } else if (s_sel < s_visible_count) {
-                activateEntry(menu, s_sel);
+                s_sel = content_slots - 1;
+            } else if (s_sel < gc) {
+                s_groups_return_view = (s_view == S2View_Grid) ? S2View_Grid : S2View_Carousel;
+                s_group_opened_from_home = true;
+                s_active_group = s_sel;
+                s_favorites_only = false;
+                s_sel = 0;
+                s_scroll_x = 0.0f;
+                s_grid_scroll_y = 0.0f;
+                switch2SfxPlay(S2Sfx_Confirm);
+                rebuildVisibleList(menu);
+            } else if (s_sel < content_slots) {
+                activateEntry(menu, s_sel - gc);
             }
         }
         return false;
     }
 
     if (down & HidNpadButton_X) {
-        if (s_visible_count > 0 && s_sel < s_visible_count && !menuIsThemeMenuActive()) {
-            switch2SfxPlay(S2Sfx_Star);
-            menuEntry_s *target = s_visible[s_sel];
-            toggleStarState(target);
-            syncSelectionFromMenu(menuGetCurrent());
+        if (content_slots > 0 && !menuIsThemeMenuActive()) {
+            if (s_sel < gc) {
+                char name[S2_GROUP_NAME_MAX];
+                if (promptGroupName("Rename Group", switch2GroupName(s_sel), name, sizeof(name))) {
+                    switch2GroupRename(s_sel, name);
+                    switch2SfxPlay(S2Sfx_Confirm);
+                }
+            } else if (s_sel < content_slots) {
+                switch2SfxPlay(S2Sfx_Star);
+                menuEntry_s *target = s_visible[s_sel - gc];
+                toggleStarState(target);
+                syncSelectionFromMenu(menuGetCurrent());
+            }
         }
         return false;
     }
 
-    int total_slots = s_visible_count + (hasEndAllSoftwareTile() ? 1 : 0);
+    int total_slots = content_slots + (hasEndAllSoftwareTile() ? 1 : 0);
     int prev_sel = s_sel;
     S2FocusZone prev_focus = s_focus;
 
@@ -2164,11 +2941,11 @@ bool switch2MenuUpdate(u64 down) {
         if (down & HidNpadButton_AnyLeft) {
             if (s_sel > 0) s_sel--;
         } else if (down & HidNpadButton_AnyRight) {
-            if (s_sel < s_visible_count - 1) s_sel++;
+            if (s_sel < content_slots - 1) s_sel++;
         } else if (down & HidNpadButton_AnyUp) {
             if (s_sel >= GRID_COLS) s_sel -= GRID_COLS;
         } else if (down & HidNpadButton_AnyDown) {
-            if (s_sel + GRID_COLS < s_visible_count)
+            if (s_sel + GRID_COLS < content_slots)
                 s_sel += GRID_COLS;
             else
                 s_focus = S2Focus_Pill;
@@ -2177,7 +2954,7 @@ bool switch2MenuUpdate(u64 down) {
             if (s_sel < 0) s_sel = 0;
         } else if (down & HidNpadButton_ZR) {
             s_sel += GRID_COLS * 2;
-            if (s_sel >= s_visible_count) s_sel = s_visible_count > 0 ? s_visible_count - 1 : 0;
+            if (s_sel >= content_slots) s_sel = content_slots > 0 ? content_slots - 1 : 0;
         }
     }
 
@@ -2186,8 +2963,8 @@ bool switch2MenuUpdate(u64 down) {
     else if (s_sel != prev_sel)
         switch2SfxPlay(S2Sfx_Move);
 
-    if (s_visible_count > 0 && s_sel < s_visible_count)
-        menu->curEntry = s_visible_indices[s_sel];
+    if (s_visible_count > 0 && s_sel >= gc && s_sel < content_slots)
+        menu->curEntry = s_visible_indices[s_sel - gc];
 
     return false;
 }
@@ -2213,7 +2990,7 @@ void switch2HandleTouch(menu_s *menu) {
             int dy = ty - s_touch_prev_y;
             if (abs(tx - s_touch_start_x) > 18 || abs(ty - s_touch_start_y) > 18)
                 s_touch_is_tap = false;
-            if (!s_touch_is_tap && !menuIsMsgBoxOpen()) {
+            if (!s_touch_is_tap && !menuIsMsgBoxOpen() && !s_group_picker_open) {
                 if (s_view == S2View_Carousel) {
                     /* Audit Fix #3: clamp horizontal drag to [0, max_scroll] */
                     float max_s = carouselMaxScroll();
@@ -2227,6 +3004,11 @@ void switch2HandleTouch(menu_s *menu) {
                     s_grid_scroll_y -= (float)dy;
                     if (s_grid_scroll_y < 0.0f) s_grid_scroll_y = 0.0f;
                     if (s_grid_scroll_y > max_y) s_grid_scroll_y = max_y;
+                } else if (s_view == S2View_Groups) {
+                    float max_y = groupsMaxScrollY();
+                    s_groups_scroll_y -= (float)dy;
+                    if (s_groups_scroll_y < 0.0f) s_groups_scroll_y = 0.0f;
+                    if (s_groups_scroll_y > max_y) s_groups_scroll_y = max_y;
                 }
             }
             s_touch_prev_x = tx;
@@ -2240,6 +3022,46 @@ void switch2HandleTouch(menu_s *menu) {
 
         if (!was_tap || menuIsNetloaderActive())
             return;
+
+        /* Group Picker modal tap handling */
+        if (s_group_picker_open) {
+            if (x1 < (int)PICKER_X || x1 > (int)(PICKER_X + PICKER_W) ||
+                y1 < (int)PICKER_Y || y1 > (int)(PICKER_Y + PICKER_H)) {
+                s_group_picker_open = false;
+                switch2SfxPlay(S2Sfx_Back);
+                return;
+            }
+            int gcount = switch2GroupsCount();
+            int total_rows = gcount + 1;
+            int vis = total_rows - s_group_picker_scroll;
+            if (vis > PICKER_MAX_ROWS) vis = PICKER_MAX_ROWS;
+            float list_y0 = PICKER_Y + 94.0f;
+            for (int r = 0; r < vis; r++) {
+                float ry = list_y0 + (float)r * PICKER_ROW_H;
+                if (y1 >= (int)ry && y1 <= (int)(ry + PICKER_ROW_H)) {
+                    int idx = s_group_picker_scroll + r;
+                    s_group_picker_sel = idx;
+                    if (idx < gcount) {
+                        switch2GroupToggleApp(idx, s_group_picker_path);
+                        switch2SfxPlay(S2Sfx_Star);
+                        rebuildVisibleList(menu);
+                    } else {
+                        char name[S2_GROUP_NAME_MAX];
+                        if (promptGroupName("New Group Name", "", name, sizeof(name))) {
+                            int gi = switch2GroupCreate(name);
+                            if (gi >= 0) {
+                                switch2GroupToggleApp(gi, s_group_picker_path);
+                                s_group_picker_sel = gi;
+                                switch2SfxPlay(S2Sfx_Confirm);
+                                rebuildVisibleList(menu);
+                            }
+                        }
+                    }
+                    return;
+                }
+            }
+            return;
+        }
 
         /* Settings view tap handling (sidebar + rows + Audit Fix #2 footer split) */
         if (s_view == S2View_Settings) {
@@ -2328,28 +3150,81 @@ void switch2HandleTouch(menu_s *menu) {
             }
         }
 
-        /* Carousel / Grid tile tap (Audit Fix #9: play SFX + activateEntry) */
+        /* Carousel / Grid / Groups tile tap (Audit Fix #9: play SFX + activateEntry) */
         rebuildVisibleList(menu);
-        if (s_view == S2View_Carousel) {
+        if (s_view == S2View_Groups && !menuIsThemeMenuActive()) {
+            if (y1 >= (int)GROUPS_CLIP_TOP && y1 <= (int)GROUPS_CLIP_BOT) {
+                int gcount = switch2GroupsCount();
+                int total_cards = gcount + 1;
+                for (int i = 0; i < total_cards; i++) {
+                    int col = i % GROUPS_COLS;
+                    int row = i / GROUPS_COLS;
+                    float tx = GROUPS_START_X + (float)col * GROUPS_STRIDE_X;
+                    float ty = GROUPS_START_Y + (float)row * GROUPS_STRIDE_Y - s_groups_scroll_y;
+                    if (x1 >= (int)tx && x1 <= (int)(tx + GROUPS_CARD_W) &&
+                        y1 >= (int)ty && y1 <= (int)(ty + GROUPS_CARD_H)) {
+                        s_group_delete_armed = -1;
+                        if (s_focus == S2Focus_Apps && s_group_sel == i) {
+                            if (i < gcount) {
+                                s_active_group = i;
+                                s_favorites_only = false;
+                                s_view = S2View_Grid;
+                                s_sel = 0;
+                                s_grid_scroll_y = 0.0f;
+                                s_focus = S2Focus_Apps;
+                                switch2SfxPlay(S2Sfx_Confirm);
+                                rebuildVisibleList(menu);
+                            } else {
+                                char name[S2_GROUP_NAME_MAX];
+                                if (promptGroupName("New Group Name", "", name, sizeof(name))) {
+                                    int gi = switch2GroupCreate(name);
+                                    if (gi >= 0) {
+                                        s_group_sel = gi;
+                                        switch2SfxPlay(S2Sfx_Confirm);
+                                    }
+                                }
+                            }
+                        } else {
+                            switch2SfxPlay(S2Sfx_Move);
+                            s_focus = S2Focus_Apps;
+                            s_group_sel = i;
+                        }
+                        return;
+                    }
+                }
+            }
+        } else if (s_view == S2View_Carousel) {
             if (y1 >= (int)CAROUSEL_TILE_Y && y1 <= (int)(CAROUSEL_TILE_Y + CAROUSEL_TILE_SZ)) {
-                int total_slots = s_visible_count + (hasEndAllSoftwareTile() ? 1 : 0);
+                int gc = inlineGroupsCount();
+                int content_slots = gc + s_visible_count;
+                int total_slots = content_slots + (hasEndAllSoftwareTile() ? 1 : 0);
                 for (int i = 0; i < total_slots; i++) {
                     float tx = CAROUSEL_START_X + (float)i * CAROUSEL_STRIDE - s_scroll_x;
                     if (x1 >= (int)tx && x1 <= (int)(tx + CAROUSEL_TILE_SZ)) {
                         if (s_focus == S2Focus_Apps && s_sel == i) {
-                            if (i == s_visible_count) {
+                            if (i == content_slots) {
                                 switch2SfxPlay(S2Sfx_Confirm);
                                 s_view = S2View_Grid;
-                                s_sel = s_visible_count - 1;
+                                s_sel = content_slots - 1;
+                            } else if (i < gc) {
+                                s_groups_return_view = S2View_Carousel;
+                                s_group_opened_from_home = true;
+                                s_active_group = i;
+                                s_favorites_only = false;
+                                s_sel = 0;
+                                s_scroll_x = 0.0f;
+                                s_grid_scroll_y = 0.0f;
+                                switch2SfxPlay(S2Sfx_Confirm);
+                                rebuildVisibleList(menu);
                             } else {
-                                activateEntry(menu, i);
+                                activateEntry(menu, i - gc);
                             }
                         } else {
                             switch2SfxPlay(S2Sfx_Move);
                             s_focus = S2Focus_Apps;
                             s_sel = i;
-                            if (i < s_visible_count)
-                                menu->curEntry = s_visible_indices[i];
+                            if (i >= gc && i < content_slots)
+                                menu->curEntry = s_visible_indices[i - gc];
                         }
                         return;
                     }
@@ -2357,7 +3232,9 @@ void switch2HandleTouch(menu_s *menu) {
             }
         } else {
             if (y1 >= (int)GRID_CLIP_TOP && y1 <= (int)GRID_CLIP_BOTTOM) {
-                for (int i = 0; i < s_visible_count; i++) {
+                int gc = inlineGroupsCount();
+                int content_slots = gc + s_visible_count;
+                for (int i = 0; i < content_slots; i++) {
                     int col = i % GRID_COLS;
                     int row = i / GRID_COLS;
                     float tx = GRID_START_X + (float)col * GRID_STRIDE_X;
@@ -2365,12 +3242,25 @@ void switch2HandleTouch(menu_s *menu) {
                     if (x1 >= (int)tx && x1 <= (int)(tx + GRID_TILE_SZ) &&
                         y1 >= (int)ty && y1 <= (int)(ty + GRID_TILE_SZ)) {
                         if (s_focus == S2Focus_Apps && s_sel == i) {
-                            activateEntry(menu, i);
+                            if (i < gc) {
+                                s_groups_return_view = S2View_Grid;
+                                s_group_opened_from_home = true;
+                                s_active_group = i;
+                                s_favorites_only = false;
+                                s_sel = 0;
+                                s_scroll_x = 0.0f;
+                                s_grid_scroll_y = 0.0f;
+                                switch2SfxPlay(S2Sfx_Confirm);
+                                rebuildVisibleList(menu);
+                            } else {
+                                activateEntry(menu, i - gc);
+                            }
                         } else {
                             switch2SfxPlay(S2Sfx_Move);
                             s_focus = S2Focus_Apps;
                             s_sel = i;
-                            menu->curEntry = s_visible_indices[i];
+                            if (i >= gc && i < content_slots)
+                                menu->curEntry = s_visible_indices[i - gc];
                         }
                         return;
                     }

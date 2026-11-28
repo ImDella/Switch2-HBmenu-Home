@@ -29,15 +29,20 @@
   * **All Software Grid** (5-column scrollable grid) accessible from the end of the carousel or the bottom pill bar.
   * **Interactive Bottom Pill Bar** with clean vector/SDF icons for **Netloader**, **Favorites** (quick filter), **All Software**, **Themes**, **Settings**, and **Exit**.
   * **Clean Switch 2 HUD**: circular header badge, clock (`HH:MM`), accurate **Wi-Fi / Airplane Mode** detection, horizontal live battery indicator, and Joy-Con P1 footer icon.
+* **Virtual Groups (Switch 2 Groups / Virtual Folders)**
+  * Organize `.nro` homebrew into custom **Virtual Groups** without moving, renaming, or modifying any files on your microSD card.
+  * Press **`L`** from anywhere to open the **Groups** view (4-column Switch 2 Group Cards with a **2×2 app icon mosaic**, app counter, and `+ New Group` card) and create/rename groups using the Switch 2 system keyboard (`swkbd`).
+  * Press **`R`** on any app to quickly toggle its group membership or create a new group via the **Add to Group** overlay.
+  * Optional **Show Groups on Home** (displays virtual group tiles directly on the Home Carousel & All Software grid) and **Hide Grouped Apps** settings.
 * **Full-Screen Switch 2 Sidebar Settings** (`General` / `Appearance` / `Audio`)
-  * **General:** Default View (`Carousel` / `All Software`), Sort Order (`Favorites First` / `Alphabetical`), Show Author & Version, **Battery Percentage** (`On` / `Off`), **Clock Format** (`24-Hour` / `12-Hour`), Transitions (`Slide & Fade` / `Fade` / `Instant`), and **Reset to Defaults** (with confirmation).
+  * **General:** Default View (`Carousel` / `All Software` / `Favorites (Carousel)` / `Favorites (Grid)` — applied immediately and persisted across launches), Sort Order (`Favorites First` / `Alphabetical`), **Show Groups on Home** (`Off` / `On`), **Hide Grouped Apps** (`Off` / `On`), Show Author & Version, **Battery Percentage** (`On` / `Off`), **Clock Format** (`24-Hour` / `12-Hour`), Transitions (`Slide & Fade` / `Fade` / `Instant`), and **Reset to Defaults** (with confirmation).
   * **Appearance:** Theme (`Auto` / `Basic Light` / `Basic Dark`), **Custom Wallpapers** (`JPG` / `PNG`) with adjustable **Dimming** (`0%–80%`), Focus Border Speed (`Slow` / `Normal` / `Fast` / `Static`), **Focus & Accent Color Presets** (`Iridescent`, `Neon Cyan`, `Switch 2 Red`, `Electric Violet`, `Gold`, `Emerald`, `Custom RGB`) + **R/G/B Sliders**, and a **Live Preview Card**.
   * **Audio:** UI Sounds (`On` / `Off`), **Custom `.zip` Sound Packs** (with instant preview & automatic fallback to built-in Switch 2 SFX), **SFX Volume**, **Streaming BGM** (`WAV` / `MP3` / `OGG` + `Random` + `Sound Pack BGM`), **BGM Volume**, and smooth launch fade-out paired with a Switch 2 app launch animation.
   * **Auto-Folders & Auto-Rescan:** Required SD folders are created automatically on first launch and rescanned whenever you open Settings.
 * **Full Gamepad & Touchscreen Support**
-  * Horizontal touch drag on the carousel, tap to select/launch, tap pill icons directly, and touch navigation in Settings.
+  * Horizontal touch drag on the carousel, vertical drag on All Software & Groups grids, tap to select/launch, tap pill icons directly, and touch navigation in Settings & Group Picker.
 * **Non-Destructive Configuration**
-  * Settings are stored in a dedicated file (`sdmc:/config/nx-hbmenu/switch2_settings.cfg`) and never touch upstream `nx-hbmenu`'s `settings.cfg`.
+  * Settings and groups are stored in dedicated files (`sdmc:/config/nx-hbmenu/switch2_settings.cfg` and `sdmc:/config/nx-hbmenu/switch2_groups.cfg`) and never touch upstream `nx-hbmenu`'s `settings.cfg` or your SD card folder layout.
 
 ---
 
@@ -48,10 +53,12 @@
 | **D-Pad / Left Stick** | Navigate apps, grid, pill bar, or settings |
 | **Down** *(on carousel / last grid row)* | Move focus to the bottom pill bar |
 | **Up / B** *(on pill bar)* | Return focus to apps |
-| **A** | Launch app / Open folder / Apply theme / Select pill item |
-| **B** | Back (exit Settings, Grid, Favorites filter, Theme Menu, or subfolder) |
-| **X** | Star / Unstar favorite app |
-| **Y** | Start Netloader (`nxlink`) |
+| **A** | Launch app / Open folder or group / Apply theme / Select pill item |
+| **B** | Back (exit Settings, Groups, Grid, Favorites filter, Theme Menu, or subfolder) |
+| **X** | Star / Unstar favorite app *(or Rename group in Groups / Home)* |
+| **Y** | Start Netloader (`nxlink`) *(or double-press to Delete group in Groups)* |
+| **L** | Open Virtual Groups view |
+| **R** | Add / remove focused app from Virtual Groups |
 | **- (Minus)** | Open Theme Menu |
 | **ZL / ZR** | Fast page jump |
 | **+ (Plus)** | Exit Homebrew Menu |

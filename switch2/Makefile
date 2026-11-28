@@ -24,7 +24,7 @@ endif
 TOPDIR ?= $(CURDIR)
 include $(DEVKITPRO)/libounce/switch2_rules
 
-APP_VERSION	:=	2.0.0
+APP_VERSION	:=	2.1.0
 APP_TITLE	:=	Homebrew Menu
 APP_AUTHOR	:=	ImDella, ouncebrew, switchbrew
 
