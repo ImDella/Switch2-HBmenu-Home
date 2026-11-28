@@ -9,6 +9,7 @@
 #include "../common/common.h"
 
 void switch2UiInit(ThemePreset system_preset);
+void switch2UiExit(void);
 void switch2MenuDraw(void);
 bool switch2MenuUpdate(u64 down);
 void switch2HandleTouch(menu_s *menu);

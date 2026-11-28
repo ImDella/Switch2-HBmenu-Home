@@ -24,7 +24,7 @@ endif
 TOPDIR ?= $(CURDIR)
 include $(DEVKITPRO)/libounce/switch2_rules
 
-APP_VERSION	:=	3.6.1
+APP_VERSION	:=	2.0.0
 APP_TITLE	:=	Homebrew Menu
 APP_AUTHOR	:=	ImDella, ouncebrew, switchbrew
 
@@ -43,7 +43,7 @@ ICON		?=	switch2/icon.jpg
 #---------------------------------------------------------------------------------
 ARCH	:=	$(SWITCH2_CPU) -mtp=soft -fPIE
 
-PKGS	:=	libconfig libturbojpeg freetype2 physfs
+PKGS	:=	libconfig libturbojpeg libpng freetype2 physfs vorbisfile vorbis ogg minizip zlib
 
 CFLAGS	:=	-g -Wall -O2 -ffunction-sections -fdata-sections \
 			$(ARCH) $(DEFINES) `$(PREFIX)pkg-config --cflags $(PKGS)`

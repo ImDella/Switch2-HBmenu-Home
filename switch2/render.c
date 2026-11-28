@@ -98,6 +98,10 @@ static struct {
     uint8_t circ_angle_lut[128 * 128];
     uint8_t circle_ring_alpha[128 * 128];
     uint32_t iridescent_lut[256]; /* 0x00BBGGRR */
+    int last_rect_shift;
+    uint32_t last_rect_c1, last_rect_c2;
+    int last_circ_shift;
+    uint32_t last_circ_c1, last_circ_c2;
 
     Mutex image_lock;
     struct CachedImage images[MAX_IMAGES];
@@ -121,6 +125,8 @@ static struct {
     .star_texture = RenderTexture_None,
     .netloader_texture = RenderTexture_None,
     .gear_texture = RenderTexture_None,
+    .last_rect_shift = -1,
+    .last_circ_shift = -1,
 };
 
 /* --- Quads ---------------------------------------------------------------- */
@@ -717,15 +723,47 @@ static void initRingLuts(void) {
 }
 
 static void uploadAnimatedRing(RenderTexture tex, int sz, const uint8_t *angle_lut,
-                               const uint8_t *alpha_lut, float timer) {
+                               const uint8_t *alpha_lut, float timer,
+                               uint32_t primary_color, uint32_t secondary_color,
+                               int *last_shift, uint32_t *last_c1, uint32_t *last_c2) {
     if (tex == RenderTexture_None)
         return;
     initRingLuts();
+    /* Calm, smooth Switch 2 rotation (~1 full gentle cycle every ~6 seconds) */
+    uint8_t shift = (uint8_t)((int)(timer * 14.0f) & 255);
+    if (*last_shift == (int)shift && *last_c1 == primary_color && *last_c2 == secondary_color)
+        return;
+
     uint32_t *texels = renderBackendUpload(tex, 0, 0, (uint32_t)sz, (uint32_t)sz);
     if (!texels)
         return;
-    /* Calm, smooth Switch 2 rotation (~1 full gentle cycle every ~6 seconds) */
-    uint8_t shift = (uint8_t)((int)(timer * 14.0f) & 255);
+
+    *last_shift = (int)shift;
+    *last_c1 = primary_color;
+    *last_c2 = secondary_color;
+
+    uint32_t custom_lut[256];
+    const uint32_t *lut = render.iridescent_lut;
+    if (primary_color != 0) {
+        uint8_t r1 = (uint8_t)(primary_color & 0xff);
+        uint8_t g1 = (uint8_t)((primary_color >> 8) & 0xff);
+        uint8_t b1 = (uint8_t)((primary_color >> 16) & 0xff);
+        uint32_t c2 = secondary_color ? secondary_color : primary_color;
+        uint8_t r2 = (uint8_t)(c2 & 0xff);
+        uint8_t g2 = (uint8_t)((c2 >> 8) & 0xff);
+        uint8_t b2 = (uint8_t)((c2 >> 16) & 0xff);
+        for (int i = 0; i < 256; i++) {
+            /* Smooth dual-wave shimmer around the ring */
+            float phase = (float)i * (6.2831853f / 256.0f);
+            float t = 0.5f - 0.5f * cosf(phase * 2.0f);
+            uint8_t r = (uint8_t)((float)r1 + ((float)r2 - (float)r1) * t + 0.5f);
+            uint8_t g = (uint8_t)((float)g1 + ((float)g2 - (float)g1) * t + 0.5f);
+            uint8_t b = (uint8_t)((float)b1 + ((float)b2 - (float)b1) * t + 0.5f);
+            custom_lut[i] = (uint32_t)r | ((uint32_t)g << 8) | ((uint32_t)b << 16);
+        }
+        lut = custom_lut;
+    }
+
     const int total = sz * sz;
     for (int i = 0; i < total; i++) {
         uint8_t a = alpha_lut[i];
@@ -734,17 +772,19 @@ static void uploadAnimatedRing(RenderTexture tex, int sz, const uint8_t *angle_l
             continue;
         }
         uint8_t cidx = (uint8_t)(angle_lut[i] + shift);
-        texels[i] = ((uint32_t)a << 24) | render.iridescent_lut[cidx];
+        texels[i] = ((uint32_t)a << 24) | lut[cidx];
     }
 }
 
 void renderSwitch2FocusRingF(float x, float y, float w, float h, float radius, float thickness,
                              float timer, uint32_t primary_color, uint32_t secondary_color) {
     closeOpenRun();
-    (void)radius; (void)thickness; (void)primary_color; (void)secondary_color;
+    (void)radius; (void)thickness;
     if (render.ring_texture == RenderTexture_None)
         return;
-    uploadAnimatedRing(render.ring_texture, 256, render.rect_angle_lut, render.rect_ring_alpha, timer);
+    uploadAnimatedRing(render.ring_texture, 256, render.rect_angle_lut, render.rect_ring_alpha,
+                       timer, primary_color, secondary_color,
+                       &render.last_rect_shift, &render.last_rect_c1, &render.last_rect_c2);
     /* Expand slightly by 6/122 to accommodate the subtle tight outer glow */
     const float glow_pad_x = w * (6.0f / 244.0f);
     const float glow_pad_y = h * (6.0f / 244.0f);
@@ -757,10 +797,12 @@ void renderSwitch2FocusRingF(float x, float y, float w, float h, float radius, f
 void renderSwitch2CircleFocusRingF(float cx, float cy, float radius, float thickness,
                                    float timer, uint32_t primary_color, uint32_t secondary_color) {
     closeOpenRun();
-    (void)thickness; (void)primary_color; (void)secondary_color;
+    (void)thickness;
     if (render.circle_ring_texture == RenderTexture_None)
         return;
-    uploadAnimatedRing(render.circle_ring_texture, 128, render.circ_angle_lut, render.circle_ring_alpha, timer);
+    uploadAnimatedRing(render.circle_ring_texture, 128, render.circ_angle_lut, render.circle_ring_alpha,
+                       timer, primary_color, secondary_color,
+                       &render.last_circ_shift, &render.last_circ_c1, &render.last_circ_c2);
     /* Expand by 64/59 to accommodate the subtle tight outer glow */
     const float draw_r = radius * (64.0f / 59.0f);
     const float s = render.scale;
@@ -1016,8 +1058,12 @@ static void uploadShapeTextures(void) {
 
     /* Animated iridescent focus rings are uploaded dynamically per frame when drawn,
      * initialize them once here so they are always in SHADER_READ_ONLY_OPTIMAL layout. */
-    uploadAnimatedRing(render.ring_texture, 256, render.rect_angle_lut, render.rect_ring_alpha, 0.0f);
-    uploadAnimatedRing(render.circle_ring_texture, 128, render.circ_angle_lut, render.circle_ring_alpha, 0.0f);
+    render.last_rect_shift = -1;
+    render.last_circ_shift = -1;
+    uploadAnimatedRing(render.ring_texture, 256, render.rect_angle_lut, render.rect_ring_alpha, 0.0f,
+                       0, 0, &render.last_rect_shift, &render.last_rect_c1, &render.last_rect_c2);
+    uploadAnimatedRing(render.circle_ring_texture, 128, render.circ_angle_lut, render.circle_ring_alpha, 0.0f,
+                       0, 0, &render.last_circ_shift, &render.last_circ_c1, &render.last_circ_c2);
 
     /* Soft Gaussian-like drop shadow (powers 9-slice soft elevation shadows) */
     if (render.shadow_texture != RenderTexture_None) {

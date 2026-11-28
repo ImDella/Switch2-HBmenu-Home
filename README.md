@@ -27,14 +27,11 @@
   * **All Software Grid** (5-column scrollable grid) accessible from the end of the carousel or the bottom pill bar.
   * **Interactive Bottom Pill Bar** with clean vector/SDF icons for **Netloader**, **Favorites** (quick filter), **All Software**, **Themes**, **Settings**, and **Exit**.
   * **Clean Switch 2 HUD**: circular header badge, clock (`HH:MM`), accurate **Wi-Fi / Airplane Mode** detection, horizontal live battery indicator, and Joy-Con P1 footer icon.
-* **Full-Screen Switch 2 Settings**
-  * **UI Sounds**: On / Off (ultra-discreet tactile Switch 2 micro-ticks via non-blocking `audout`).
-  * **Theme**: Auto (System) / Basic Light / Basic Dark — while preserving compatibility with standard `nx-hbmenu` `.cfg` themes via the Theme Menu (`-`).
-  * **Focus Border Speed**: Slow / Normal / Fast / Static.
-  * **Transitions**: Slide & Fade / Fade / Instant.
-  * **Default View**: Carousel / All Software.
-  * **Sort Order**: Favorites First / Alphabetical.
-  * **Show Author & Version**: On / Off.
+* **Full-Screen Switch 2 Sidebar Settings** (`General` / `Appearance` / `Audio`)
+  * **General:** Default View (`Carousel` / `All Software`), Sort Order (`Favorites First` / `Alphabetical`), Show Author & Version, **Battery Percentage** (`On` / `Off`), **Clock Format** (`24-Hour` / `12-Hour`), Transitions (`Slide & Fade` / `Fade` / `Instant`), and **Reset to Defaults** (with confirmation).
+  * **Appearance:** Theme (`Auto` / `Basic Light` / `Basic Dark`), **Custom Wallpapers** (`JPG` / `PNG`) with adjustable **Dimming** (`0%–80%`), Focus Border Speed (`Slow` / `Normal` / `Fast` / `Static`), **Focus & Accent Color Presets** (`Iridescent`, `Neon Cyan`, `Switch 2 Red`, `Electric Violet`, `Gold`, `Emerald`, `Custom RGB`) + **R/G/B Sliders**, and a **Live Preview Card**.
+  * **Audio:** UI Sounds (`On` / `Off`), **Custom `.zip` Sound Packs** (with instant preview & automatic fallback to built-in Switch 2 SFX), **SFX Volume**, **Streaming BGM** (`WAV` / `MP3` / `OGG` + `Random` + `Sound Pack BGM`), **BGM Volume**, and smooth launch fade-out paired with a Switch 2 app launch animation.
+  * **Auto-Folders & Auto-Rescan:** Required SD folders are created automatically on first launch and rescanned whenever you open Settings.
 * **Full Gamepad & Touchscreen Support**
   * Horizontal touch drag on the carousel, tap to select/launch, tap pill icons directly, and touch navigation in Settings.
 * **Non-Destructive Configuration**
@@ -59,12 +56,38 @@
 
 ---
 
+## Custom Wallpapers, BGM & Sound Packs
+
+On first launch, Homebrew Menu automatically creates these folders on your microSD card:
+
+| Feature | Folder on microSD | Supported Formats |
+| :--- | :--- | :--- |
+| **Wallpapers** | `sdmc:/config/nx-hbmenu/wallpapers/` | `.jpg`, `.jpeg`, `.png` (auto-scaled up to 1080p) |
+| **Background Music** | `sdmc:/config/nx-hbmenu/bgm/` | `.wav`, `.mp3`, `.ogg` (looped streaming) |
+| **Sound Packs** | `sdmc:/config/nx-hbmenu/sfx/` | `.zip` archives (no need to extract) |
+
+### Creating a `.zip` Sound Pack
+Place your `.wav` files in the root of a `.zip` archive (or inside a `sounds/` subfolder). Any missing sound automatically falls back to the built-in Switch 2 tactile SFX:
+
+| UI Event | Supported Filenames (case-insensitive) |
+| :--- | :--- |
+| **Cursor Move** | `move.wav`, `cursor_move.wav`, `cursor.wav`, `tick.wav` |
+| **Pill / Settings Move** | `pill.wav`, `dock_enter.wav`, `options.wav`, `cursor_move.wav` |
+| **Confirm / Select** | `confirm.wav`, `enter_menu.wav`, `ok.wav`, `select.wav` |
+| **Back / Cancel** | `back.wav`, `cancel.wav`, `back_menu.wav` |
+| **Star / Favorite** | `star.wav`, `notification.wav`, `favorite.wav` |
+| **App Launch** | `launch.wav`, `startup.wav` |
+| **Optional Pack BGM** | `bgm.wav`, `bgm.mp3`, `bgm.ogg` |
+
+---
+
 ## Installation (Switch 2 / kaiHEN)
 
-1. Download the latest `hbmenu.nro` from the [Releases](https://github.com/ImDella/Switch2-HBmenu-Home/releases/latest) page.
-2. Back up your existing `sdmc:/hbmenu.nro` (e.g. rename it to `hbmenu_backup.nro`).
-3. Copy the new `hbmenu.nro` to the root of your microSD card (`sdmc:/hbmenu.nro`).
-4. Launch any game while holding **`R`** under **kaiHEN** to boot into Homebrew Menu.
+1. Download `hbmenu.nro` from the [Releases](https://github.com/ImDella/Switch2-HBmenu-Home/releases/latest) page.
+2. *(Optional)* Download **`Switch2-HBmenu-StarterPack.zip`** from the same release and extract it to the root of your microSD card to get ready-to-use wallpapers, BGM, and `.zip` sound packs.
+3. Back up your existing `sdmc:/hbmenu.nro` (e.g. rename it to `hbmenu_backup.nro`).
+4. Copy the new `hbmenu.nro` to the root of your microSD card (`sdmc:/hbmenu.nro`).
+5. Launch any game while holding **`R`** under **kaiHEN** to boot into Homebrew Menu.
 
 ---
 
@@ -77,6 +100,9 @@ Requires **devkitPro** (`devkitA64`) with the **[ounce-devkit](https://github.co
 * `switch-freetype`
 * `switch-libconfig`
 * `switch-libjpeg-turbo`
+* `switch-libpng`
+* `switch-libvorbis`
+* `switch-minizip`
 * `switch-physfs`
 
 ### Compile
@@ -107,7 +133,7 @@ This project is an unofficial community modification and is not affiliated with,
 * **Switch 2 HOME UI, Settings & Tactile SFX:** [ImDella](https://github.com/ImDella)
 * **Switch 2 Port, Toolchain & HEN:** [ounce-hbmenu](https://github.com/ouncebrew/ounce-hbmenu), [ounce-devkit](https://github.com/ouncebrew/ounce-devkit) & [kaiHEN](https://github.com/ouncebrew/kaihen) by [ouncebrew](https://github.com/ouncebrew)
 * **Original `nx-hbmenu`:** [switchbrew](https://github.com/switchbrew/nx-hbmenu) (based on 3DS [new-hbmenu](https://github.com/fincs/new-hbmenu) by fincs)
-* **Libraries:** `nanosvg` (zlib license), `libjpeg-turbo`, `libconfig`, `freetype2`, `physfs`
+* **Libraries:** `nanosvg` (zlib), `dr_mp3` (Public Domain / MIT-0), `libjpeg-turbo`, `libpng`, `libvorbis`, `minizip`, `libconfig`, `freetype2`, `physfs`
 
 ## License
 

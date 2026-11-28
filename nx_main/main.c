@@ -117,13 +117,6 @@ int main(int argc, char **argv)
 
     if (R_SUCCEEDED(rc)) menuStartup();
 
-    #ifdef __SWITCH2__
-    if (R_SUCCEEDED(rc)) {
-        switch2SfxInit();
-        switch2UiInit((ThemePreset)theme);
-    }
-    #endif
-
     if (R_SUCCEEDED(rc)) {
         if (!launchInit()) {
             rc = 2;
@@ -155,6 +148,10 @@ int main(int argc, char **argv)
 
     if (!error_screen) {
         graphicsInit(FB_WIDTH, FB_HEIGHT);
+        #ifdef __SWITCH2__
+        switch2SfxInit();
+        switch2UiInit((ThemePreset)theme);
+        #endif
     }
     else {
         consoleInit(NULL);
@@ -198,6 +195,9 @@ int main(int argc, char **argv)
     }
 
     if (!error_screen) {
+        #ifdef __SWITCH2__
+        switch2UiExit();
+        #endif
         graphicsExit();
     }
     else {
